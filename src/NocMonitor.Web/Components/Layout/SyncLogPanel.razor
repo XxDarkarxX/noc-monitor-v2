@@ -1,0 +1,196 @@
+@implements IDisposable
+@using NocMonitor.Data.Entities
+@using NocMonitor.Web.Services
+@inject SyncLogService SyncLogService
+@inject SyncLogNotifier Notifier
+@inject HpvSyncService HpvSyncService
+
+<div class="sync-log">
+    <button type="button" class="sync-log-trigger" title="Sync HPVs/VMs now"
+            aria-label="Sync HPVs/VMs now" disabled="@_syncing"
+            @onclick="SyncNowAsync">
+        <span class="@(_syncing ? "sync-log-icon sync-log-icon-spinning" : "sync-log-icon")" aria-hidden="true">⟳</span>
+    </button>
+    <button type="button" class="sync-log-trigger" title="HPV/VM sync log"
+            aria-label="HPV/VM sync log" aria-haspopup="dialog" aria-expanded="@_open"
+            @onclick="ToggleOpenAsync">
+        <span class="sync-log-icon" aria-hidden="true">🕘</span>
+        @if (_unacknowledgedCount > 0)
+        {
+            <span class="sync-log-badge">@(_unacknowledgedCount > 99 ? "99+" : _unacknowledgedCount.ToString())</span>
+        }
+    </button>
+
+    @if (_open)
+    {
+        <div class="sync-log-panel" role="dialog" aria-label="HPV/VM sync log">
+            <div class="sync-log-tabs" role="tablist">
+                <button type="button" class="@TabClass(SyncLogTab.New)" role="tab" aria-selected="@(_tab == SyncLogTab.New)"
+                        @onclick="() => SetTabAsync(SyncLogTab.New)">
+                    New @(_unacknowledgedCount > 0 ? $"({_unacknowledgedCount})" : "")
+                </button>
+                <button type="button" class="@TabClass(SyncLogTab.History)" role="tab" aria-selected="@(_tab == SyncLogTab.History)"
+                        @onclick="() => SetTabAsync(SyncLogTab.History)">
+                    History
+                </button>
+                <button type="button" class="sync-log-close" title="Close" aria-label="Close sync log"
+                        @onclick="Close">✕</button>
+            </div>
+
+            <div class="sync-log-body">
+                @if (_tab == SyncLogTab.New)
+                {
+                    @if (_unacknowledged is null)
+                    {
+                        <p class="md-body-medium sync-log-status">Loading...</p>
+                    }
+                    else if (_unacknowledged.Count == 0)
+                    {
+                        <div class="sync-log-empty">
+                            <span class="sync-log-empty-icon" aria-hidden="true">✓</span>
+                            <p class="md-body-medium">All caught up.</p>
+                        </div>
+                    }
+                    else
+                    {
+                        <ul class="sync-log-list">
+                            @foreach (var entry in _unacknowledged)
+                            {
+                                <li class="sync-log-item">
+                                    <button type="button" class="sync-log-check" title="Mark as seen"
+                                            aria-label="Mark @(EventLabel(entry.EventType).ToLowerInvariant()) of @entry.HostName as seen"
+                                            @onclick="() => AcknowledgeAsync(entry.Id)">✓</button>
+                                    @EntryBody(entry)
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+                else
+                {
+                    @if (_history is null)
+                    {
+                        <p class="md-body-medium sync-log-status">Loading...</p>
+                    }
+                    else if (_history.Count == 0)
+                    {
+                        <p class="md-body-medium sync-log-status"><em>No entries yet.</em></p>
+                    }
+                    else
+                    {
+                        <ul class="sync-log-list">
+                            @foreach (var entry in _history)
+                            {
+                                <li class="sync-log-item sync-log-item-readonly">
+                                    @EntryBody(entry)
+                                </li>
+                            }
+                        </ul>
+                    }
+                }
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    private enum SyncLogTab { New, History }
+
+    private bool _open;
+    private bool _syncing;
+    private SyncLogTab _tab = SyncLogTab.New;
+    private List<SyncLogEntry>? _unacknowledged;
+    private List<SyncLogEntry>? _history;
+    private int _unacknowledgedCount;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshCountAsync();
+        Notifier.Changed += OnChanged;
+    }
+
+    private async Task RefreshCountAsync() =>
+        _unacknowledgedCount = await SyncLogService.GetUnacknowledgedCountAsync();
+
+    // Potentially called from the sync's background thread: InvokeAsync
+    // marshals back to the circuit's sync context, same pattern as Home.razor.
+    // It's also the only thing that refreshes the panel after a click right
+    // here (SyncLogService.AcknowledgeAsync fires this same event) — avoids
+    // duplicating the refresh in the click handler itself.
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        await RefreshCountAsync();
+        if (_open)
+            await LoadTabAsync();
+        StateHasChanged();
+    });
+
+    // Same RunSyncAsync used by the "Sync now" button on /hosts, so you don't
+    // have to leave the dashboard/header. If the run adds/deactivates
+    // anything, HpvSyncService already calls Notifier.NotifyChanged() (OnChanged
+    // above) — the StateHasChanged below is only for the spinning icon.
+    private async Task SyncNowAsync()
+    {
+        _syncing = true;
+        StateHasChanged();
+
+        await HpvSyncService.RunSyncAsync(CancellationToken.None);
+
+        _syncing = false;
+        StateHasChanged();
+    }
+
+    private async Task ToggleOpenAsync()
+    {
+        _open = !_open;
+        if (_open)
+            await LoadTabAsync();
+    }
+
+    private void Close() => _open = false;
+
+    private async Task SetTabAsync(SyncLogTab tab)
+    {
+        _tab = tab;
+        await LoadTabAsync();
+    }
+
+    private async Task LoadTabAsync()
+    {
+        if (_tab == SyncLogTab.New)
+            _unacknowledged = await SyncLogService.GetUnacknowledgedAsync();
+        else
+            _history = await SyncLogService.GetAllAsync();
+    }
+
+    private Task AcknowledgeAsync(long id) => SyncLogService.AcknowledgeAsync(id);
+
+    private string TabClass(SyncLogTab tab) => tab == _tab ? "active" : "";
+
+    private RenderFragment EntryBody(SyncLogEntry entry) => @<div class="sync-log-item-text">
+        <span class="sync-log-event sync-log-event-@EventClass(entry.EventType)">@EventLabel(entry.EventType)</span>
+        <span class="sync-log-name">@entry.HostName</span>
+        <span class="sync-log-type">@TypeLabel(entry.Type)</span>
+        <span class="sync-log-time md-body-small">@FormatTimestamp(entry.Timestamp)</span>
+    </div>;
+
+    private static string EventLabel(SyncEventType type) => type switch
+    {
+        SyncEventType.Added => "Added",
+        SyncEventType.Deactivated => "Deactivated",
+        _ => type.ToString(),
+    };
+
+    private static string EventClass(SyncEventType type) => type.ToString().ToLowerInvariant();
+
+    private static string TypeLabel(HostType type) => type switch
+    {
+        HostType.Hpv => "HPV",
+        HostType.Vm => "VM",
+        _ => type.ToString(),
+    };
+
+    private static string FormatTimestamp(DateTime utc) => utc.ToLocalTime().ToString("dd/MM/yyyy HH:mm");
+
+    public void Dispose() => Notifier.Changed -= OnChanged;
+}

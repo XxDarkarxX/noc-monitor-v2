@@ -1,0 +1,22 @@
+@inherits LayoutComponentBase
+
+<div class="page">
+    <header class="top-header">
+        <div class="brand-bar">
+            <div class="brand-row">
+                <span class="brand-dot" aria-hidden="true"></span>
+                <a class="brand" href="/">NOC Monitor</a>
+            </div>
+            <SyncLogPanel />
+        </div>
+        <nav class="top-nav">
+            <NavLink href="/" Match="NavLinkMatch.All">Dashboard</NavLink>
+            <NavLink href="/hosts">Hosts</NavLink>
+        </nav>
+    </header>
+    <main>
+        <article class="content">
+            @Body
+        </article>
+    </main>
+</div>

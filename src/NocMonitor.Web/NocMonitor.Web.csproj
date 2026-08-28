@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>NocMonitor.Web</RootNamespace>
+    <UserSecretsId>noc-monitor-v2-dev-secrets</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NocMonitor.Core\NocMonitor.Core.csproj" />
+    <ProjectReference Include="..\NocMonitor.Data\NocMonitor.Data.csproj" />
+    <ProjectReference Include="..\NocMonitor.Alerts\NocMonitor.Alerts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Requerido por las EF Core Tools: el startup project necesita su propia
+         referencia a Design, la de NocMonitor.Data no fluye (PrivateAssets=all). -->
+    <PackageReference Include="Cronos" Version="0.13.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.11">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,25 @@
+## .NET
+bin/
+obj/
+*.user
+
+## Secretos y datos locales - NUNCA subir
+appsettings.Development.json
+appsettings.Local.json
+.env
+*.db
+*.db-shm
+*.db-wal
+/data/
+
+## Logs
+logs/
+*.log
+
+## Docker
+docker-compose.override.yml
+
+## IDE
+.vs/
+.idea/
+*.suo

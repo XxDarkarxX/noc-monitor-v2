@@ -1,0 +1,220 @@
+@page "/"
+@implements IDisposable
+@using NocMonitor.Data.Entities
+@using NocMonitor.Web.Services
+@inject DashboardService DashboardService
+@inject HostService HostService
+@inject HostStatusNotifier Notifier
+
+<PageTitle>NOC Monitor</PageTitle>
+
+<h1 class="md-headline-large">Dashboard</h1>
+
+<div class="stats-bar">
+    <div class="stat-card">
+        <span class="stat-value">@(_hosts?.Count ?? 0)</span>
+        <span class="stat-label">Total</span>
+    </div>
+    <div class="stat-card stat-card-up">
+        <span class="stat-value">@CountByStatus(HostStatus.Up)</span>
+        <span class="stat-label">Up</span>
+    </div>
+    <div class="stat-card stat-card-warning">
+        <span class="stat-value">@CountByStatus(HostStatus.Warning)</span>
+        <span class="stat-label">Degraded</span>
+    </div>
+    <div class="stat-card stat-card-down">
+        <span class="stat-value">@CountByStatus(HostStatus.Down)</span>
+        <span class="stat-label">Down</span>
+    </div>
+</div>
+
+<div class="dashboard-header">
+    <div class="type-filter" role="tablist">
+        <button type="button" class="@FilterClass(null)" @onclick="() => SetFilter(null)">All</button>
+        <button type="button" class="@FilterClass(HostType.Server)" @onclick="() => SetFilter(HostType.Server)">Servers</button>
+        <button type="button" class="@FilterClass(HostType.Hpv)" @onclick="() => SetFilter(HostType.Hpv)">HPVs</button>
+        <button type="button" class="@FilterClass(HostType.Vm)" @onclick="() => SetFilter(HostType.Vm)">VMs</button>
+        @if (HasHttpHosts())
+        {
+            <button type="button" class="@(_httpOnlyFilter ? "active" : "")" @onclick="SetHttpFilter">Web Endpoint</button>
+        }
+    </div>
+</div>
+
+@if (_hosts is null)
+{
+    <p class="md-body-medium">Loading...</p>
+}
+else if (_hosts.Count == 0)
+{
+    <p class="md-body-medium"><em>No hosts yet. <a href="/hosts/new">Add one</a>.</em></p>
+}
+else
+{
+    @foreach (var group in VisibleGroups())
+    {
+        <section class="host-group">
+            <h2 class="md-title-large">@TypeLabel(group.Key) <span class="group-count">(@group.Count())</span></h2>
+            <div class="host-grid">
+                @foreach (var info in group)
+                {
+                    <div class="host-card status-@StatusClass(info.Status)">
+                        <button type="button" class="host-managed-toggle @(info.Host.IsMonitored ? "managed" : "unmanaged")"
+                                title="@(info.Host.IsMonitored ? "Stop checking (maintenance)" : "Resume checking")"
+                                @onclick="() => ToggleManagedAsync(info.Host)">
+                            @(info.Host.IsMonitored ? "Managed" : "Unmanaged")
+                        </button>
+                        <a class="host-card-link" href="@($"/hosts/{info.Host.Id}/history")">
+                            <div class="host-card-top">
+                                <span class="status-dot" aria-hidden="true">@StatusIcon(info.Status)</span>
+                                <span class="md-title-medium host-name">@info.Host.Name</span>
+                                @if (info.Host.IsMuted)
+                                {
+                                    <span title="Muted" aria-hidden="true">🔕</span>
+                                }
+                            </div>
+                            @if (info.Host.Type == HostType.Vm && !string.IsNullOrWhiteSpace(info.Host.ParentHostName))
+                            {
+                                <div class="md-body-small host-parent">on @info.Host.ParentHostName</div>
+                            }
+                            <div class="md-body-small host-target">@(info.Host.CheckType == CheckType.Icmp ? info.Host.Ip : info.Host.HttpUrl)</div>
+                            <div class="md-label-medium host-status-line">
+                                @StatusLabel(info.Status)
+                                @if (info.Status == HostStatus.Down && info.OpenIncident is not null)
+                                {
+                                    <text> · down for @DashboardService.FormatDuration(DateTime.UtcNow - info.OpenIncident.StartedAt)</text>
+                                }
+                                else if (info.LastCheckAt is not null)
+                                {
+                                    <text> · @DashboardService.FormatDuration(DateTime.UtcNow - info.LastCheckAt.Value) ago</text>
+                                }
+                            </div>
+                        </a>
+                        @if (CanMute(info))
+                        {
+                            <div class="host-card-actions">
+                                <button type="button" class="host-card-action-btn" title="Mute alerts for @info.Host.Name"
+                                        @onclick="() => MuteHostAsync(info.Host.Id)">
+                                    🔕 Mute
+                                </button>
+                            </div>
+                        }
+                        else if (info.Host.IsMuted)
+                        {
+                            <div class="host-card-actions">
+                                <button type="button" class="host-card-action-btn" title="Unmute alerts for @info.Host.Name"
+                                        @onclick="() => UnmuteHostAsync(info.Host.Id)">
+                                    🔔 Unmute
+                                </button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </section>
+    }
+}
+
+@code {
+    private List<HostStatusInfo>? _hosts;
+    private HostType? _filter;
+    private bool _httpOnlyFilter;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        Notifier.Changed += OnChanged;
+    }
+
+    private async Task LoadAsync()
+    {
+        _hosts = await DashboardService.GetHostStatusesAsync();
+    }
+
+    // Called from the scheduler's background thread: InvokeAsync marshals
+    // back to the circuit's sync context so we can touch component state.
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
+
+    private void SetFilter(HostType? type)
+    {
+        _filter = type;
+        _httpOnlyFilter = false;
+    }
+
+    private void SetHttpFilter()
+    {
+        _filter = null;
+        _httpOnlyFilter = true;
+    }
+
+    private int CountByStatus(HostStatus status) => _hosts?.Count(h => h.Status == status) ?? 0;
+
+    private string FilterClass(HostType? type) => !_httpOnlyFilter && _filter == type ? "active" : "";
+
+    private bool HasHttpHosts() => _hosts?.Any(h => h.Host.CheckType == CheckType.Http) ?? false;
+
+    private IEnumerable<IGrouping<HostType, HostStatusInfo>> VisibleGroups() =>
+        _hosts!
+            .Where(h => _httpOnlyFilter ? h.Host.CheckType == CheckType.Http : _filter is null || h.Host.Type == _filter)
+            .GroupBy(h => h.Host.Type)
+            .OrderBy(g => (int)g.Key);
+
+    private static string TypeLabel(HostType type) => type switch
+    {
+        HostType.Server => "Servers",
+        HostType.Hpv => "HPVs",
+        HostType.Vm => "VMs",
+        _ => type.ToString(),
+    };
+
+    private static string StatusLabel(HostStatus status) => status switch
+    {
+        HostStatus.Up => "Up",
+        HostStatus.Warning => "Degraded",
+        HostStatus.Down => "Down",
+        _ => "Unmonitored",
+    };
+
+    private static string StatusClass(HostStatus status) => status.ToString().ToLowerInvariant();
+
+    // The "Mute" button only appears once a real alert has actually fired
+    // (confirmed red): not on green, not on orange/flapping pre-threshold,
+    // and not if it's already muted (shows "Unmute" there instead).
+    private static bool CanMute(HostStatusInfo info) =>
+        !info.Host.IsMuted && info.Status == HostStatus.Down && info.OpenIncident is { AlertsSent: >= 1 };
+
+    private async Task MuteHostAsync(int hostId)
+    {
+        await HostService.SetMuteAsync(hostId, mutedIndefinitely: true, mutedUntil: null);
+        await LoadAsync();
+    }
+
+    private async Task UnmuteHostAsync(int hostId)
+    {
+        await HostService.SetMuteAsync(hostId, mutedIndefinitely: false, mutedUntil: null);
+        await LoadAsync();
+    }
+
+    private async Task ToggleManagedAsync(Host host)
+    {
+        await HostService.SetManagedAsync(host.Id, isManaged: !host.IsMonitored);
+        await LoadAsync();
+    }
+
+    // Don't rely on color alone: each status also has a distinct shape/glyph
+    // (accessibility for color blindness — red/green/amber isn't enough).
+    private static string StatusIcon(HostStatus status) => status switch
+    {
+        HostStatus.Up => "✓",
+        HostStatus.Warning => "!",
+        HostStatus.Down => "✕",
+        _ => "–",
+    };
+
+    public void Dispose() => Notifier.Changed -= OnChanged;
+}

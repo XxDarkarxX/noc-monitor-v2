@@ -1,0 +1,48 @@
+@using NocMonitor.Data.Entities
+
+<div class="mute-editor">
+    @if (Host.IsMuted)
+    {
+        <span class="badge badge-muted">
+            @(Host.MutedIndefinitely ? "Muted (indefinitely)" : $"Muted until {Host.MutedUntil:yyyy-MM-dd HH:mm} UTC")
+        </span>
+        <button type="button" @onclick="ClearMuteAsync">Unmute</button>
+    }
+    else if (_editing)
+    {
+        <div class="mute-form">
+            <button type="button" @onclick="MuteIndefinitelyAsync">Indefinitely</button>
+            <input type="datetime-local" @bind="_until" />
+            <button type="button" @onclick="MuteUntilAsync" disabled="@(_until is null)">Until that date (UTC)</button>
+            <button type="button" @onclick="() => _editing = false">Cancel</button>
+        </div>
+    }
+    else
+    {
+        <span class="badge badge-active">Active</span>
+        <button type="button" @onclick="() => _editing = true">Mute</button>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public NocMonitor.Data.Entities.Host Host { get; set; } = default!;
+    [Parameter] public EventCallback<(bool Indefinitely, DateTime? Until)> OnMuteChanged { get; set; }
+
+    private bool _editing;
+    private DateTime? _until;
+
+    private Task MuteIndefinitelyAsync()
+    {
+        _editing = false;
+        return OnMuteChanged.InvokeAsync((true, (DateTime?)null));
+    }
+
+    private Task MuteUntilAsync()
+    {
+        if (_until is null) return Task.CompletedTask;
+        _editing = false;
+        return OnMuteChanged.InvokeAsync((false, DateTime.SpecifyKind(_until.Value, DateTimeKind.Utc)));
+    }
+
+    private Task ClearMuteAsync() => OnMuteChanged.InvokeAsync((false, (DateTime?)null));
+}

@@ -1,0 +1,110 @@
+@page "/hosts/{HostId:int}/history"
+@using NocMonitor.Data.Entities
+@using NocMonitor.Web.Services
+@inject DashboardService DashboardService
+
+<PageTitle>History - NOC Monitor</PageTitle>
+
+@if (!_loaded)
+{
+    <p class="md-body-medium">Loading...</p>
+}
+else if (_host is null)
+{
+    <p class="md-body-medium">Host not found.</p>
+    <a href="/">Back to dashboard</a>
+}
+else
+{
+    <div class="history-header">
+        <h1 class="md-headline-large">@_host.Name</h1>
+        <p class="md-body-medium">
+            @TypeLabel(_host.Type)
+            @if (_host.Type == HostType.Vm && !string.IsNullOrWhiteSpace(_host.ParentHostName))
+            {
+                <text> · running on @_host.ParentHostName</text>
+            }
+            · @(_host.CheckType == CheckType.Icmp ? _host.Ip : _host.HttpUrl)
+        </p>
+        <p><a href="/">← Back to dashboard</a></p>
+    </div>
+
+    <h2 class="md-title-large">Incidents</h2>
+    @if (_incidents!.Count == 0)
+    {
+        <p class="md-body-medium"><em>No incidents recorded.</em></p>
+    }
+    else
+    {
+        <table class="incident-table">
+            <thead>
+                <tr><th>Started</th><th>Ended</th><th>Duration</th><th>Alerts sent</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var incident in _incidents)
+                {
+                    <tr>
+                        <td>@incident.StartedAt.ToLocalTime().ToString("g")</td>
+                        <td>@(incident.ResolvedAt is null ? "Ongoing" : incident.ResolvedAt.Value.ToLocalTime().ToString("g"))</td>
+                        <td>@DashboardService.FormatDuration((incident.ResolvedAt ?? DateTime.UtcNow) - incident.StartedAt)</td>
+                        <td>@incident.AlertsSent</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <h2 class="md-title-large">Recent checks</h2>
+    @if (_checks!.Count == 0)
+    {
+        <p class="md-body-medium"><em>No checks recorded yet.</em></p>
+    }
+    else
+    {
+        <table class="check-table">
+            <thead>
+                <tr><th>Date</th><th>Result</th><th>Latency</th><th>Error</th></tr>
+            </thead>
+            <tbody>
+                @foreach (var check in _checks)
+                {
+                    <tr class="@(check.Success ? "" : "check-row-fail")">
+                        <td>@check.Timestamp.ToLocalTime().ToString("G")</td>
+                        <td>@(check.Success ? "OK" : "Failed")</td>
+                        <td>@(check.LatencyMs is null ? "—" : $"{check.LatencyMs} ms")</td>
+                        <td>@(check.ErrorMessage ?? "—")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+}
+
+@code {
+    [Parameter] public int HostId { get; set; }
+
+    private bool _loaded;
+    private Host? _host;
+    private List<Incident>? _incidents;
+    private List<CheckResult>? _checks;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _host = await DashboardService.GetHostAsync(HostId);
+        if (_host is not null)
+        {
+            _incidents = await DashboardService.GetIncidentsAsync(HostId);
+            _checks = await DashboardService.GetRecentChecksAsync(HostId);
+        }
+
+        _loaded = true;
+    }
+
+    private static string TypeLabel(HostType type) => type switch
+    {
+        HostType.Server => "Server",
+        HostType.Hpv => "HPV",
+        HostType.Vm => "VM",
+        _ => type.ToString(),
+    };
+}

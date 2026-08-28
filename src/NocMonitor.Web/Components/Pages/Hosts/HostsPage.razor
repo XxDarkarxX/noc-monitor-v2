@@ -1,0 +1,122 @@
+@page "/hosts"
+@using NocMonitor.Data.Entities
+@using NocMonitor.Web.Services
+@inject HostService HostService
+@inject HpvSyncService HpvSyncService
+@inject IJSRuntime JS
+
+<PageTitle>Hosts - NOC Monitor</PageTitle>
+
+<h1>Hosts</h1>
+
+<p>
+    <a class="btn" href="/hosts/new">+ New host</a>
+    <button type="button" class="btn" disabled="@_syncing" @onclick="SyncNowAsync">
+        @(_syncing ? "Syncing..." : "Sync now")
+    </button>
+    @if (_syncMessage is not null)
+    {
+        <span class="sync-now-message">@_syncMessage</span>
+    }
+</p>
+
+@if (_hosts is null)
+{
+    <p>Loading...</p>
+}
+else if (_hosts.Count == 0)
+{
+    <p><em>No hosts yet.</em></p>
+}
+else
+{
+    <table class="host-table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Type</th>
+                <th>Source</th>
+                <th>Check</th>
+                <th>Target</th>
+                <th>Mute</th>
+                <th></th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var host in _hosts)
+            {
+                <tr>
+                    <td>@host.Name</td>
+                    <td>@host.Type</td>
+                    <td>
+                        <span class="badge badge-@(host.Source == HostSource.Manual ? "manual" : "synced")">
+                            @(host.Source == HostSource.Manual ? "Manual" : "Synced")
+                        </span>
+                    </td>
+                    <td>@host.CheckType</td>
+                    <td>@(host.CheckType == CheckType.Icmp ? host.Ip : host.HttpUrl)</td>
+                    <td>
+                        <MuteEditor Host="host" OnMuteChanged="args => SetMuteAsync(host, args)" />
+                    </td>
+                    <td class="actions">
+                        @if (host.Source == HostSource.Manual)
+                        {
+                            <a href="@($"/hosts/{host.Id}/edit")">Edit</a>
+                            <button type="button" @onclick="() => DeleteAsync(host)">Delete</button>
+                        }
+                        else
+                        {
+                            <span class="readonly-note">Read-only (comes from sync)</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<Host>? _hosts;
+    private bool _syncing;
+    private string? _syncMessage;
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _hosts = await HostService.GetAllAsync();
+    }
+
+    private async Task DeleteAsync(Host host)
+    {
+        var confirmed = await JS.InvokeAsync<bool>("confirm", $"Delete host \"{host.Name}\"?");
+        if (!confirmed) return;
+
+        await HostService.DeleteAsync(host.Id);
+        await LoadAsync();
+    }
+
+    private async Task SetMuteAsync(Host host, (bool Indefinitely, DateTime? Until) args)
+    {
+        await HostService.SetMuteAsync(host.Id, args.Indefinitely, args.Until);
+        await LoadAsync();
+    }
+
+    // Triggers the same logic that runs on its own every Sunday 3am
+    // (RunSyncAsync already catches its own exceptions and just logs),
+    // handy for demos without waiting on the cron. The header's sync panel
+    // refreshes on its own via SyncLogNotifier; here we just need to reload
+    // the host table.
+    private async Task SyncNowAsync()
+    {
+        _syncing = true;
+        _syncMessage = null;
+        StateHasChanged();
+
+        await HpvSyncService.RunSyncAsync(CancellationToken.None);
+        await LoadAsync();
+
+        _syncing = false;
+        _syncMessage = $"Last run: {DateTime.Now:HH:mm:ss}";
+    }
+}

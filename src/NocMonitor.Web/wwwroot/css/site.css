@@ -1,0 +1,773 @@
+:root {
+    /* Tells the browser this page already handles its own dark theme, so
+       Chrome doesn't "correct" the brand colors with its auto-dark-mode. */
+    color-scheme: dark;
+
+    /* Brand palette */
+    --brand-turquoise: #04BFBF;
+    --brand-teal: #167373;
+    --brand-orange: #BF4904;
+    --brand-dark: #1F1612;
+    --brand-light: #F2F2F2;
+
+    /* Host status — independent of the brand palette */
+    --status-up: #22C55E;
+    --status-down: #EF4444;
+    --status-warning: #F5A623;
+    --status-unmonitored: #6B7280;
+
+    --surface: #2A1F19;
+    --border: #3D2E25;
+    --text: var(--brand-light);
+    --text-muted: #B8AFA9;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    padding: 2rem;
+    background: var(--brand-dark);
+    color: var(--text);
+    font-family: 'Roboto', system-ui, sans-serif;
+}
+
+h1, h2, h3, p {
+    margin: 0 0 0.5rem;
+}
+
+a {
+    color: var(--brand-turquoise);
+}
+
+/* --- Material Design 3 type scale --- */
+/* m3.material.io/styles/typography/type-scale-tokens */
+.md-display-large { font-size: 3.5625rem; line-height: 4rem; font-weight: 400; letter-spacing: -0.25px; }
+.md-display-medium { font-size: 2.8125rem; line-height: 3.25rem; font-weight: 400; letter-spacing: 0; }
+.md-display-small { font-size: 2.25rem; line-height: 2.75rem; font-weight: 400; letter-spacing: 0; }
+.md-headline-large { font-size: 2rem; line-height: 2.5rem; font-weight: 400; letter-spacing: 0; }
+.md-headline-medium { font-size: 1.75rem; line-height: 2.25rem; font-weight: 400; letter-spacing: 0; }
+.md-headline-small { font-size: 1.5rem; line-height: 2rem; font-weight: 400; letter-spacing: 0; }
+.md-title-large { font-size: 1.375rem; line-height: 1.75rem; font-weight: 400; letter-spacing: 0; }
+.md-title-medium { font-size: 1rem; line-height: 1.5rem; font-weight: 500; letter-spacing: 0.15px; }
+.md-title-small { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.1px; }
+.md-label-large { font-size: 0.875rem; line-height: 1.25rem; font-weight: 500; letter-spacing: 0.1px; }
+.md-label-medium { font-size: 0.75rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.5px; }
+.md-label-small { font-size: 0.6875rem; line-height: 1rem; font-weight: 500; letter-spacing: 0.5px; }
+.md-body-large { font-size: 1rem; line-height: 1.5rem; font-weight: 400; letter-spacing: 0.5px; }
+.md-body-medium { font-size: 0.875rem; line-height: 1.25rem; font-weight: 400; letter-spacing: 0.25px; }
+.md-body-small { font-size: 0.75rem; line-height: 1rem; font-weight: 400; letter-spacing: 0.4px; }
+
+/* --- Navigation --- */
+.top-header {
+    /* Bleeds to the viewport edges (cancels the body's padding) and
+       reapplies it in here, so the gradient covers the full width without
+       touching the rest of the page's layout. */
+    margin: -2rem -2rem 2rem;
+    padding: 1.5rem 2rem 0;
+    background-color: var(--brand-dark);
+    background-image: linear-gradient(180deg, #362a20 0%, var(--brand-dark) 100%);
+}
+
+.brand-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1.1rem;
+}
+
+.brand-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+}
+
+.brand-dot {
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--brand-turquoise);
+    box-shadow: 0 0 10px 3px rgba(4, 191, 191, 0.55);
+    flex-shrink: 0;
+}
+
+.top-header .brand {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text);
+    text-decoration: none;
+    letter-spacing: -0.3px;
+}
+
+.top-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.75rem;
+    border-bottom: 1px solid #3a2f28;
+}
+
+.top-nav a {
+    display: inline-block;
+    padding: 0.1rem 0.1rem 0.75rem;
+    margin-bottom: -1px;
+    color: var(--text-muted);
+    text-decoration: none;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+    border-bottom: 2px solid transparent;
+}
+
+.top-nav a:hover {
+    color: var(--text);
+}
+
+.top-nav a.active {
+    color: var(--text);
+    border-bottom-color: var(--brand-turquoise);
+}
+
+/* --- Sync log (header) --- */
+.sync-log {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.sync-log-icon-spinning {
+    display: inline-block;
+    animation: sync-log-spin 0.8s linear infinite;
+}
+
+@keyframes sync-log-spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+.sync-log-trigger {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.25rem;
+    height: 2.25rem;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-size: 1.1rem;
+    cursor: pointer;
+}
+
+.sync-log-trigger:hover {
+    color: var(--text);
+    border-color: var(--brand-turquoise);
+}
+
+.sync-log-trigger:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.sync-log-badge {
+    position: absolute;
+    top: -0.3rem;
+    right: -0.3rem;
+    min-width: 1.1rem;
+    height: 1.1rem;
+    padding: 0 0.25rem;
+    border-radius: 999px;
+    background: var(--status-down);
+    color: var(--brand-light);
+    font-size: 0.6875rem;
+    font-weight: 700;
+    line-height: 1.1rem;
+    text-align: center;
+    box-shadow: 0 0 0 2px var(--brand-dark);
+}
+
+.sync-log-panel {
+    position: absolute;
+    top: calc(100% + 0.6rem);
+    right: 0;
+    z-index: 901;
+    width: min(400px, 90vw);
+    max-height: min(28rem, 70vh);
+    display: flex;
+    flex-direction: column;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+    background-image: linear-gradient(165deg, #332720 0%, #241a14 100%);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.sync-log-tabs {
+    display: flex;
+    align-items: center;
+    gap: 1.25rem;
+    padding: 0.75rem 1rem 0;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.sync-log-close {
+    margin-left: auto;
+    margin-bottom: 0.65rem;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.sync-log-close:hover {
+    color: var(--text);
+}
+
+.sync-log-tabs button {
+    padding: 0.1rem 0.1rem 0.65rem;
+    margin-bottom: -1px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+}
+
+.sync-log-tabs button:hover {
+    color: var(--text);
+}
+
+.sync-log-tabs button.active {
+    color: var(--text);
+    border-bottom-color: var(--brand-turquoise);
+}
+
+.sync-log-body {
+    overflow-y: auto;
+    padding: 0.5rem 0;
+}
+
+.sync-log-status {
+    padding: 1rem;
+    color: var(--text-muted);
+}
+
+.sync-log-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 2rem 1rem;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+.sync-log-empty-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    border: 1.5px solid var(--status-up);
+    color: var(--status-up);
+    font-size: 1.1rem;
+}
+
+.sync-log-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.sync-log-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.55rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.sync-log-item:last-child {
+    border-bottom: none;
+}
+
+.sync-log-item-readonly {
+    padding-left: calc(1rem + 1.4rem + 0.6rem);
+}
+
+.sync-log-check {
+    flex-shrink: 0;
+    width: 1.4rem;
+    height: 1.4rem;
+    margin-top: 0.15rem;
+    border-radius: 50%;
+    border: 1.5px solid var(--border);
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.sync-log-check:hover {
+    border-color: var(--status-up);
+    color: var(--status-up);
+}
+
+.sync-log-item-text {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.35rem;
+    min-width: 0;
+}
+
+.sync-log-event {
+    padding: 0.05rem 0.4rem;
+    border-radius: 999px;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.3px;
+}
+
+.sync-log-event-added { background: rgba(34, 197, 94, 0.18); color: var(--status-up); }
+.sync-log-event-deactivated { background: rgba(191, 73, 4, 0.25); color: #ff9455; }
+
+.sync-log-name {
+    font-weight: 500;
+    color: var(--text);
+}
+
+.sync-log-type,
+.sync-log-time {
+    color: var(--text-muted);
+}
+
+.sync-log-time {
+    flex-basis: 100%;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.4rem 0.8rem;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-decoration: none;
+    color: var(--text);
+}
+
+/* --- Dashboard (Phase 5) --- */
+.dashboard-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 1rem;
+    margin-bottom: 2rem;
+}
+
+.type-filter {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.type-filter button {
+    padding: 0.4rem 0.9rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-muted);
+    font-family: inherit;
+    font-size: 0.875rem;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+}
+
+.type-filter button.active {
+    background: var(--brand-teal);
+    border-color: var(--brand-teal);
+    color: var(--brand-light);
+    box-shadow: 0 2px 6px rgba(4, 191, 191, 0.25);
+}
+
+.stats-bar {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+}
+
+.stat-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 1rem 1.2rem;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background-color: var(--surface);
+    background-image: linear-gradient(160deg, #33271d 0%, var(--surface) 100%);
+}
+
+.stat-value {
+    font-size: 2rem;
+    line-height: 1.1;
+    font-weight: 700;
+    color: var(--text);
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    letter-spacing: 0.4px;
+}
+
+.stat-card-up { background-color: var(--surface); background-image: linear-gradient(160deg, rgba(34, 197, 94, 0.14) 0%, var(--surface) 100%); }
+.stat-card-warning { background-color: var(--surface); background-image: linear-gradient(160deg, rgba(245, 166, 35, 0.14) 0%, var(--surface) 100%); }
+.stat-card-down { background-color: var(--surface); background-image: linear-gradient(160deg, rgba(239, 68, 68, 0.14) 0%, var(--surface) 100%); }
+
+.stat-card-up .stat-value { color: var(--status-up); }
+.stat-card-warning .stat-value { color: var(--status-warning); }
+.stat-card-down .stat-value { color: var(--status-down); }
+
+.host-group {
+    margin-bottom: 2.5rem;
+}
+
+.host-group h2 {
+    color: var(--brand-turquoise);
+}
+
+.group-count {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+.host-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    gap: 1rem;
+}
+
+.host-card {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    padding: 1rem 1.1rem;
+    border-radius: 10px;
+    background-color: #241a14;
+    background-image: linear-gradient(165deg, #332720 0%, #241a14 100%);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--status-unmonitored);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    transition: transform 0.1s ease, border-color 0.2s ease, box-shadow 0.1s ease;
+}
+
+.host-managed-toggle {
+    position: absolute;
+    top: 0.7rem;
+    right: 0.75rem;
+    z-index: 1;
+    padding: 0.15rem 0.55rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    font-family: inherit;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    cursor: pointer;
+    /* Chrome's auto-dark-mode (independent of the :root color-scheme:dark)
+       sometimes fails to resolve a var()-based color on this particular
+       button and leaves it gray instead of green/gray as appropriate; this
+       tells the browser not to touch its colors. */
+    forced-color-adjust: none;
+}
+
+.host-managed-toggle.managed {
+    color: var(--status-up);
+    border-color: var(--status-up);
+}
+
+.host-managed-toggle.unmanaged {
+    color: var(--status-unmonitored);
+    border-color: var(--status-unmonitored);
+}
+
+.host-managed-toggle:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.host-card:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.host-card-link {
+    display: block;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.host-card-link:hover {
+    text-decoration: none;
+}
+
+.host-card.status-up { border-left-color: var(--status-up); }
+.host-card.status-warning { border-left-color: var(--status-warning); }
+.host-card.status-down { border-left-color: var(--status-down); }
+.host-card.status-unmonitored { border-left-color: var(--status-unmonitored); opacity: 0.7; }
+
+.host-card-top {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.35rem;
+    /* Leaves room on the right for the Managed/Unmanaged button, which
+       floats absolutely above this row (see .host-managed-toggle). */
+    padding-right: 5rem;
+}
+
+.status-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.1rem;
+    height: 1.1rem;
+    border-radius: 50%;
+    border: 1.5px solid currentColor;
+    color: currentColor;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.host-card.status-up .status-dot { color: var(--status-up); }
+.host-card.status-warning .status-dot { color: var(--status-warning); }
+.host-card.status-down .status-dot { color: var(--status-down); }
+.host-card.status-unmonitored .status-dot { color: var(--status-unmonitored); }
+
+.host-name {
+    flex: 1;
+}
+
+.host-parent,
+.host-target {
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
+}
+
+.host-status-line {
+    display: block;
+    margin-top: 0.5rem;
+    color: var(--text-muted);
+}
+
+.host-card.status-up .host-status-line { color: var(--status-up); }
+.host-card.status-warning .host-status-line { color: var(--status-warning); }
+.host-card.status-down .host-status-line { color: var(--status-down); }
+
+.host-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    margin-top: 0.6rem;
+    padding-top: 0.6rem;
+    border-top: 1px solid var(--border);
+}
+
+.host-card-action-btn {
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.8rem;
+    letter-spacing: 0.1px;
+    cursor: pointer;
+}
+
+.host-card-action-btn:hover {
+    background: var(--brand-teal);
+    border-color: var(--brand-teal);
+}
+
+/* --- History (Phase 5) --- */
+.history-header {
+    margin-bottom: 2rem;
+}
+
+.history-header .md-body-medium {
+    color: var(--text-muted);
+}
+
+table.incident-table,
+table.check-table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 2rem;
+}
+
+.incident-table th, .incident-table td,
+.check-table th, .check-table td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.875rem;
+}
+
+.check-row-fail { color: var(--status-down); }
+
+/* --- Host CRUD (Phase 3) --- */
+table.host-table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.host-table th,
+.host-table td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+}
+
+.host-table .actions {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.readonly-note {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+}
+
+.badge-manual { background: var(--brand-teal); }
+.badge-synced { background: var(--brand-orange); }
+.badge-active { background: #1e4a2f; }
+.badge-muted { background: var(--status-down); }
+
+.mute-editor {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.mute-form {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.host-form .field {
+    margin-bottom: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    max-width: 400px;
+}
+
+.host-form input,
+.host-form select {
+    padding: 0.4rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    font-family: inherit;
+}
+
+.validation-message {
+    color: var(--status-down);
+    font-size: 0.85rem;
+}
+
+/* --- SignalR connection status (Phase 5) --- */
+/* Blazor creates this <div> at runtime and toggles its visibility with
+   style="display: block/none" set directly inline by its own JS (not via
+   classes) — an inline style beats any display rule of ours, so we do NOT
+   fight that property here. Without this CSS the div is left with a <div>'s
+   default display and no text, invisible: if the circuit dropped, the
+   dashboard would just sit "frozen" on its last state without telling
+   anyone. The overlay (background + centered message) is what we do
+   control, via position:fixed and a ::before, which inherits the parent's
+   visibility without fighting over the display property. */
+#components-reconnect-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    background: rgba(31, 22, 18, 0.88);
+}
+
+#components-reconnect-modal::before {
+    content: "Lost connection to the server — reconnecting…";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 26rem;
+    font-size: 1.375rem;
+    color: var(--brand-light);
+    text-align: center;
+    padding: 1rem 2rem;
+}
+
+#components-reconnect-modal.components-reconnect-failed::before,
+#components-reconnect-modal.components-reconnect-rejected::before {
+    content: "Could not reconnect. Tap to reload the page.";
+}
+
+#components-reconnect-modal.components-reconnect-failed,
+#components-reconnect-modal.components-reconnect-rejected {
+    cursor: pointer;
+}
+
+#blazor-error-ui {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 0.75rem 1.25rem;
+    background: var(--status-down);
+    color: var(--brand-light);
+    box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.4);
+    z-index: 1001;
+}
+
+#blazor-error-ui .reload {
+    color: var(--brand-light);
+    text-decoration: underline;
+    margin-left: 0.5rem;
+}
+
+#blazor-error-ui .dismiss {
+    cursor: pointer;
+    position: absolute;
+    right: 1rem;
+}

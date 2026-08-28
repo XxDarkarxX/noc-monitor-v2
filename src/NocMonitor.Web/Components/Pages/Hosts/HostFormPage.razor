@@ -1,0 +1,154 @@
+@page "/hosts/new"
+@page "/hosts/{Id:int}/edit"
+@using System.ComponentModel.DataAnnotations
+@using NocMonitor.Data.Entities
+@using NocMonitor.Web.Services
+@inject HostService HostService
+@inject NavigationManager Nav
+
+<PageTitle>@(Id is null ? "New host" : "Edit host") - NOC Monitor</PageTitle>
+
+<h1>@(Id is null ? "New host" : "Edit host")</h1>
+
+@if (_loading)
+{
+    <p>Loading...</p>
+}
+else if (_notFound)
+{
+    <p>Host not found.</p>
+    <a href="/hosts">Back</a>
+}
+else if (_readOnlyBlocked)
+{
+    <p>This host comes from the sync (Source=Synced) and can't be edited here — the weekly sync would overwrite it anyway.</p>
+    <a href="/hosts">Back</a>
+}
+else
+{
+    <EditForm Model="_form" OnValidSubmit="SaveAsync" class="host-form">
+        <DataAnnotationsValidator />
+        <ValidationSummary />
+
+        <div class="field">
+            <label>Name</label>
+            <InputText @bind-Value="_form.Name" />
+        </div>
+
+        <div class="field">
+            <label>Check type</label>
+            <InputSelect @bind-Value="_form.CheckType">
+                <option value="@CheckType.Icmp">ICMP (ping)</option>
+                <option value="@CheckType.Http">HTTP</option>
+            </InputSelect>
+        </div>
+
+        @if (_form.CheckType == CheckType.Icmp)
+        {
+            <div class="field">
+                <label>IP</label>
+                <InputText @bind-Value="_form.Ip" placeholder="192.168.1.10" />
+            </div>
+        }
+        else
+        {
+            <div class="field">
+                <label>URL</label>
+                <InputText @bind-Value="_form.HttpUrl" placeholder="https://example.com/health" />
+            </div>
+        }
+
+        <div class="field">
+            <label>Interval (seconds) — optional, empty uses the global default</label>
+            <InputNumber @bind-Value="_form.IntervalSecondsOverride" />
+        </div>
+
+        <div class="field">
+            <label>Fail threshold — optional, empty uses the global default</label>
+            <InputNumber @bind-Value="_form.FailThresholdOverride" />
+        </div>
+
+        <button type="submit">Save</button>
+        <a href="/hosts">Cancel</a>
+    </EditForm>
+}
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private bool _loading = true;
+    private bool _notFound;
+    private bool _readOnlyBlocked;
+    private HostFormModel _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Id is { } id)
+        {
+            var host = await HostService.GetByIdAsync(id);
+            if (host is null)
+            {
+                _notFound = true;
+            }
+            else if (host.Source != HostSource.Manual)
+            {
+                _readOnlyBlocked = true;
+            }
+            else
+            {
+                _form = new HostFormModel
+                {
+                    Name = host.Name,
+                    CheckType = host.CheckType,
+                    Ip = host.Ip,
+                    HttpUrl = host.HttpUrl,
+                    IntervalSecondsOverride = host.IntervalSecondsOverride,
+                    FailThresholdOverride = host.FailThresholdOverride,
+                };
+            }
+        }
+
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (Id is { } id)
+        {
+            await HostService.UpdateAsync(
+                id, _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
+                _form.IntervalSecondsOverride, _form.FailThresholdOverride);
+        }
+        else
+        {
+            await HostService.CreateAsync(
+                _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
+                _form.IntervalSecondsOverride, _form.FailThresholdOverride);
+        }
+
+        Nav.NavigateTo("/hosts");
+    }
+
+    private sealed class HostFormModel : IValidatableObject
+    {
+        [Required(ErrorMessage = "Name is required.")]
+        public string? Name { get; set; }
+
+        public CheckType CheckType { get; set; } = CheckType.Icmp;
+
+        public string? Ip { get; set; }
+        public string? HttpUrl { get; set; }
+
+        public int? IntervalSecondsOverride { get; set; }
+        public int? FailThresholdOverride { get; set; }
+
+        public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        {
+            if (CheckType == CheckType.Icmp && string.IsNullOrWhiteSpace(Ip))
+                yield return new ValidationResult("IP is required for an ICMP check.", [nameof(Ip)]);
+
+            if (CheckType == CheckType.Http && string.IsNullOrWhiteSpace(HttpUrl))
+                yield return new ValidationResult("URL is required for an HTTP check.", [nameof(HttpUrl)]);
+        }
+    }
+}
