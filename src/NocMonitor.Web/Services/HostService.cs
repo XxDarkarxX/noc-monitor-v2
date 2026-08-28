@@ -12,7 +12,7 @@ namespace NocMonitor.Web.Services;
 /// be pointless. Muting notifications is the one exception and applies to
 /// any host.
 /// </summary>
-public sealed class HostService(NocMonitorDbContext db)
+public sealed class HostService(NocMonitorDbContext db, ILogger<HostService> logger)
 {
     public Task<List<Host>> GetAllAsync(CancellationToken cancellationToken = default) =>
         db.Hosts.AsNoTracking().OrderBy(h => h.Name).ToListAsync(cancellationToken);
@@ -100,13 +100,21 @@ public sealed class HostService(NocMonitorDbContext db)
     /// </summary>
     public async Task SetManagedAsync(int id, bool isManaged, CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         var host = await db.Hosts.FirstOrDefaultAsync(h => h.Id == id, cancellationToken)
             ?? throw new InvalidOperationException($"Host {id} does not exist.");
+        var tFetch = sw.ElapsedMilliseconds;
 
         host.IsMonitored = isManaged;
         host.UpdatedAt = DateTime.UtcNow;
 
         await db.SaveChangesAsync(cancellationToken);
+
+        // [PERF]
+        logger.LogInformation(
+            "[PERF] SetManagedAsync({HostId}): fetch={FetchMs}ms save={SaveMs}ms total={TotalMs}ms",
+            id, tFetch, sw.ElapsedMilliseconds - tFetch, sw.ElapsedMilliseconds);
     }
 
     private async Task<Host> RequireManualHostAsync(int id, CancellationToken cancellationToken)

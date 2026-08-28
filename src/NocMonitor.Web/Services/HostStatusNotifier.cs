@@ -8,18 +8,26 @@ namespace NocMonitor.Web.Services;
 /// dashboard to just reload everything on each event.
 ///
 /// Throttled to at most 1 firing per ThrottleWindow: CheckSchedulerService
-/// calls NotifyChanged once per EACH host checked (with ~40 hosts at
-/// second-level intervals, that's several firings per second). Without
-/// throttling, every firing triggers a full dashboard reload
-/// (GetHostStatusesAsync, with the CheckResults table growing unbounded) on
-/// the Blazor Server circuit's single sync context — that saturates it and
-/// leaves any other UI interaction (e.g. the sync panel) queued for several
-/// seconds behind dashboard reloads it doesn't even depend on. The first
-/// firing in a burst goes out immediately (leading edge); ones that arrive
-/// during the window collapse into a single final firing (trailing edge) so
-/// the latest state isn't lost.
+/// now calls NotifyChanged once per tick (not once per host - see
+/// PersistAndEvaluateAsync), but the throttle stays as a cheap safety net.
+/// The first firing in a burst goes out immediately (leading edge); ones
+/// that arrive during the window collapse into a single final firing
+/// (trailing edge) so the latest state isn't lost.
+///
+/// [PERF audit]: this used to matter a lot more than the throttle alone
+/// suggests. GetHostStatusesAsync's "latest check per host" query degraded
+/// from ~25ms to ~550-600ms as CheckResults grew past ~1.5M rows (fixed by
+/// denormalizing onto Host - see its comment), and CheckSchedulerService
+/// used to run one SaveChangesAsync per due host concurrently, which
+/// serialized on SQLite's single-writer lock and could take 3s+ under load
+/// (fixed by batching - see PersistAndEvaluateAsync). Both together meant
+/// every firing of this event could occupy the circuit's single-threaded
+/// dispatcher for over a second, delaying unrelated clicks (e.g. the sync
+/// panel) queued behind it on the same circuit. Measured before/after in
+/// git history; if either of those numbers pull >100ms in production,
+/// look here first.
 /// </summary>
-public sealed class HostStatusNotifier
+public sealed class HostStatusNotifier(ILogger<HostStatusNotifier> logger)
 {
     private static readonly TimeSpan ThrottleWindow = TimeSpan.FromSeconds(1);
 
@@ -54,6 +62,11 @@ public sealed class HostStatusNotifier
             }
         }
 
+        // [PERF] leading-edge fire: subscribers' handlers run synchronously
+        // off this call, on whatever thread called NotifyChanged (the
+        // scheduler's background thread). Debug level: useful for a future
+        // audit, too frequent (up to 1/s) for permanent Information logging.
+        logger.LogDebug("[PERF] HostStatusNotifier firing (leading edge) at {Time:HH:mm:ss.ffffff}", DateTime.Now);
         Changed?.Invoke();
     }
 
@@ -66,6 +79,7 @@ public sealed class HostStatusNotifier
             _trailingTimer = null;
         }
 
+        logger.LogDebug("[PERF] HostStatusNotifier firing (trailing edge) at {Time:HH:mm:ss.ffffff}", DateTime.Now);
         Changed?.Invoke();
     }
 }

@@ -5,6 +5,7 @@
 @inject DashboardService DashboardService
 @inject HostService HostService
 @inject HostStatusNotifier Notifier
+@inject ILogger<Home> Logger
 
 <PageTitle>NOC Monitor</PageTitle>
 
@@ -134,11 +135,31 @@ else
 
     // Called from the scheduler's background thread: InvokeAsync marshals
     // back to the circuit's sync context so we can touch component state.
-    private void OnChanged() => _ = InvokeAsync(async () =>
+    // [PERF audit]: fires up to 1/s while the dashboard is open, so this is
+    // logged at Debug (not Information) to avoid permanent log spam - raise
+    // the log level if a future audit needs to check dispatcher queue wait
+    // (raisedAt vs dispatchedAt) again.
+    private void OnChanged()
     {
-        await LoadAsync();
-        StateHasChanged();
-    });
+        var raisedAt = DateTime.Now;
+        Logger.LogDebug("[PERF] Home.OnChanged raised at {Time:HH:mm:ss.ffffff}", raisedAt);
+
+        _ = InvokeAsync(async () =>
+        {
+            var dispatchedAt = DateTime.Now;
+            Logger.LogDebug(
+                "[PERF] Home.OnChanged dispatched at {Time:HH:mm:ss.ffffff} (queue wait={QueueWaitMs}ms)",
+                dispatchedAt, (dispatchedAt - raisedAt).TotalMilliseconds);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await LoadAsync();
+            var tLoad = sw.ElapsedMilliseconds;
+            StateHasChanged();
+            Logger.LogDebug(
+                "[PERF] Home.OnChanged done: load={LoadMs}ms render-call={RenderCallMs}ms total={TotalMs}ms",
+                tLoad, sw.ElapsedMilliseconds - tLoad, sw.ElapsedMilliseconds);
+        });
+    }
 
     private void SetFilter(HostType? type)
     {
@@ -202,8 +223,22 @@ else
 
     private async Task ToggleManagedAsync(Host host)
     {
+        // [PERF] this is a click handler: it already runs on the circuit's
+        // dispatcher (Blazor queues @onclick invocations same as InvokeAsync),
+        // so this start time already reflects any queueing delay from other
+        // work on the same circuit (e.g. Home.OnChanged from HostStatusNotifier).
+        var startedAt = DateTime.Now;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         await HostService.SetManagedAsync(host.Id, isManaged: !host.IsMonitored);
+        var tSet = sw.ElapsedMilliseconds;
+
         await LoadAsync();
+        var tLoad = sw.ElapsedMilliseconds;
+
+        Logger.LogInformation(
+            "[PERF] ToggleManagedAsync({HostId}) started={StartedAt:HH:mm:ss.ffffff} setManaged={SetMs}ms load={LoadMs}ms total={TotalMs}ms",
+            host.Id, startedAt, tSet, tLoad - tSet, sw.ElapsedMilliseconds);
     }
 
     // Don't rely on color alone: each status also has a distinct shape/glyph

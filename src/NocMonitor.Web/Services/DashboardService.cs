@@ -31,50 +31,52 @@ public sealed record HostStatusInfo(
 /// crossed, confirmed outage) — see EvaluateIncidentAsync in
 /// CheckSchedulerService.
 /// </summary>
-public sealed class DashboardService(NocMonitorDbContext db)
+public sealed class DashboardService(NocMonitorDbContext db, ILogger<DashboardService> logger)
 {
     public async Task<List<HostStatusInfo>> GetHostStatusesAsync(CancellationToken cancellationToken = default)
     {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         var hosts = await db.Hosts.AsNoTracking().OrderBy(h => h.Name).ToListAsync(cancellationToken);
+        var tHosts = sw.ElapsedMilliseconds;
 
         var openIncidents = await db.Incidents.AsNoTracking()
             .Where(i => i.ResolvedAt == null)
             .ToDictionaryAsync(i => i.HostId, cancellationToken);
+        var tIncidents = sw.ElapsedMilliseconds;
 
-        // GroupBy(HostId)+OrderByDescending+First scanned the ENTIRE table on
-        // every call — with CheckResults growing unbounded on a NOC that's
-        // been running a while, it kept getting slower (~140ms measured with
-        // ~70k rows). The correlated MAX(Timestamp) filter does use the
-        // existing (HostId, Timestamp) index, ~O(hosts) instead of O(rows in
-        // CheckResults) — dropped to ~25ms with the same table.
-        //
-        // GroupBy client-side over the result (at most a handful of rows per
-        // host) instead of ToDictionaryAsync directly: two CheckResults for
-        // the same host with an identical Timestamp would make
-        // ToDictionaryAsync blow up on a duplicate key — unlikely but not
-        // impossible.
-        var latestChecksRows = await db.CheckResults.AsNoTracking()
-            .Where(c => c.Timestamp == db.CheckResults
-                .Where(c2 => c2.HostId == c.HostId)
-                .Max(c2 => c2.Timestamp))
-            .ToListAsync(cancellationToken);
-        var latestChecks = latestChecksRows.GroupBy(c => c.HostId).ToDictionary(g => g.Key, g => g.First());
-
-        return hosts.Select(host =>
+        // "Latest check per host" used to come from a correlated
+        // MAX(Timestamp) query over CheckResults — that table grows forever
+        // (one row per host per check interval), so the query degraded from
+        // ~25ms at ~70k rows to ~550-600ms at ~1.5M rows measured in this dev
+        // session ([PERF] audit). CheckSchedulerService now writes a snapshot
+        // of the latest result directly onto the Host row (see comment
+        // there), so this is just reading fields already in `hosts` above —
+        // O(1) regardless of how large CheckResults gets.
+        var result = hosts.Select(host =>
         {
-            latestChecks.TryGetValue(host.Id, out var lastCheck);
             openIncidents.TryGetValue(host.Id, out var openIncident);
 
             var status = !host.IsMonitored
                 ? HostStatus.Unmonitored
                 : openIncident is not null
                     ? HostStatus.Down
-                    : lastCheck is null
+                    : host.LastCheckAt is null
                         ? HostStatus.Unmonitored
-                        : lastCheck.Success ? HostStatus.Up : HostStatus.Warning;
+                        : host.LastCheckSuccess == true ? HostStatus.Up : HostStatus.Warning;
 
-            return new HostStatusInfo(host, status, lastCheck?.Timestamp, lastCheck?.LatencyMs, lastCheck?.ErrorMessage, openIncident);
+            return new HostStatusInfo(host, status, host.LastCheckAt, host.LastCheckLatencyMs, host.LastCheckError, openIncident);
         }).ToList();
+
+        // [PERF audit]: called by every dashboard load AND every
+        // HostStatusNotifier-triggered refresh (up to 1/s) - Debug level to
+        // avoid permanent log spam now that this is O(1) in CheckResults size
+        // again; raise the level if a future audit needs the breakdown.
+        logger.LogDebug(
+            "[PERF] GetHostStatusesAsync: hosts={HostsMs}ms incidents={IncidentsMs}ms projection={ProjectionMs}ms total={TotalMs}ms hostCount={HostCount}",
+            tHosts, tIncidents - tHosts, sw.ElapsedMilliseconds - tIncidents, sw.ElapsedMilliseconds, hosts.Count);
+
+        return result;
     }
 
     public Task<Host?> GetHostAsync(int hostId, CancellationToken cancellationToken = default) =>

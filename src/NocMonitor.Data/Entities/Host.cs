@@ -36,6 +36,21 @@ public class Host
     public bool MutedIndefinitely { get; set; } = false;
     public DateTime? MutedUntil { get; set; }
 
+    // --- Denormalized snapshot of the most recent CheckResult ---
+    // Written by CheckSchedulerService alongside the CheckResult insert.
+    // The dashboard needs "latest check per host" on every load; querying
+    // that out of CheckResults (unbounded, grows forever) via a correlated
+    // MAX(Timestamp) subquery was ~25ms at ~70k rows but ~550-600ms once the
+    // table reached ~1.5M rows in this dev session — degrades with history
+    // size, not host count. Keeping a copy here makes that read O(1)
+    // regardless of how large CheckResults gets; per-host history
+    // (HostHistoryPage) still reads CheckResults directly since that query
+    // is already bounded (Take(100), ordered by the existing index).
+    public DateTime? LastCheckAt { get; set; }
+    public bool? LastCheckSuccess { get; set; }
+    public int? LastCheckLatencyMs { get; set; }
+    public string? LastCheckError { get; set; }
+
     public bool IsMuted => MutedIndefinitely || (MutedUntil is { } until && until > DateTime.UtcNow);
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

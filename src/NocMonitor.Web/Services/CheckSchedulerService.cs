@@ -74,47 +74,135 @@ public sealed class CheckSchedulerService(
                 }
             }
 
-            foreach (var host in dueHosts)
-            {
-                await throttle.WaitAsync(stoppingToken);
-                _ = RunCheckAsync(host, defaultFailThreshold, throttle, stoppingToken);
-            }
+            if (dueHosts.Count == 0)
+                continue;
+
+            // Checks run concurrently (I/O-bound, no DB access) but persistence
+            // is batched into a single transaction below. Root cause of the
+            // [PERF] audit: N due hosts used to mean N concurrent
+            // SaveChangesAsync calls, each opening its own connection - SQLite
+            // only allows one writer at a time, so they serialized and each
+            // one waited on all the ones ahead of it (~150ms/contender,
+            // measured up to 3s+ with ~20 concurrent). That contention is what
+            // was also stalling unrelated reads/writes from the UI (dashboard
+            // reload, SetManagedAsync, AcknowledgeAsync) whenever they landed
+            // during a burst. One batched write per tick turns that from
+            // O(dueHosts) lock acquisitions into 1, regardless of host count.
+            var outcomes = await CheckHostsAsync(dueHosts, throttle, stoppingToken);
+            await PersistAndEvaluateAsync(outcomes, defaultFailThreshold, stoppingToken);
         }
     }
 
-    private async Task RunCheckAsync(Host host, int defaultFailThreshold, SemaphoreSlim throttle, CancellationToken stoppingToken)
+    private async Task<List<(Host Host, CheckOutcome Outcome)>> CheckHostsAsync(
+        List<Host> dueHosts, SemaphoreSlim throttle, CancellationToken stoppingToken)
     {
+        var tasks = dueHosts.Select(async host =>
+        {
+            await throttle.WaitAsync(stoppingToken);
+            try
+            {
+                using var scope = scopeFactory.CreateScope();
+                var checker = scope.ServiceProvider.GetRequiredKeyedService<IChecker>(host.CheckType);
+
+                var target = new CheckTarget { Ip = host.Ip ?? string.Empty, HttpUrl = host.HttpUrl };
+                var outcome = await checker.CheckAsync(target, stoppingToken);
+                return ((Host Host, CheckOutcome? Outcome))(host, outcome);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogError(ex, "Error checking host {HostId} ({HostName})", host.Id, host.Name);
+                return (host, null);
+            }
+            finally
+            {
+                throttle.Release();
+            }
+        });
+
+        var results = await Task.WhenAll(tasks);
+        return results
+            .Where(r => r.Outcome is not null)
+            .Select(r => (r.Host, r.Outcome!))
+            .ToList();
+    }
+
+    private async Task PersistAndEvaluateAsync(
+        List<(Host Host, CheckOutcome Outcome)> outcomes, int defaultFailThreshold, CancellationToken stoppingToken)
+    {
+        if (outcomes.Count == 0)
+            return;
+
         try
         {
             using var scope = scopeFactory.CreateScope();
-            var checker = scope.ServiceProvider.GetRequiredKeyedService<IChecker>(host.CheckType);
-
-            var target = new CheckTarget { Ip = host.Ip ?? string.Empty, HttpUrl = host.HttpUrl };
-            var outcome = await checker.CheckAsync(target, stoppingToken);
-
             var db = scope.ServiceProvider.GetRequiredService<NocMonitorDbContext>();
-            db.CheckResults.Add(new CheckResult
+
+            // Tracked (not AsNoTracking) so the LastCheck* updates below get
+            // picked up by the same SaveChangesAsync as the CheckResult inserts.
+            var hostIds = outcomes.Select(o => o.Host.Id).ToList();
+            var trackedHosts = await db.Hosts
+                .Where(h => hostIds.Contains(h.Id))
+                .ToDictionaryAsync(h => h.Id, stoppingToken);
+
+            foreach (var (host, outcome) in outcomes)
             {
-                HostId = host.Id,
-                Success = outcome.Success,
-                LatencyMs = outcome.LatencyMs,
-                ErrorMessage = outcome.ErrorMessage,
-            });
+                db.CheckResults.Add(new CheckResult
+                {
+                    HostId = host.Id,
+                    Success = outcome.Success,
+                    LatencyMs = outcome.LatencyMs,
+                    ErrorMessage = outcome.ErrorMessage,
+                });
+
+                // Denormalized snapshot so the dashboard doesn't need to query
+                // CheckResults for "latest per host" - see comment on Host.
+                if (trackedHosts.TryGetValue(host.Id, out var trackedHost))
+                {
+                    trackedHost.LastCheckAt = DateTime.UtcNow;
+                    trackedHost.LastCheckSuccess = outcome.Success;
+                    trackedHost.LastCheckLatencyMs = outcome.LatencyMs;
+                    trackedHost.LastCheckError = outcome.ErrorMessage;
+                }
+            }
+
+            // [PERF] one write for the whole tick's batch, instead of one per host.
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             await db.SaveChangesAsync(stoppingToken);
+            var tSave = sw.ElapsedMilliseconds;
 
-            var failThreshold = host.FailThresholdOverride ?? defaultFailThreshold;
-            await EvaluateIncidentAsync(db, host, outcome.Success, failThreshold, stoppingToken);
+            // Sequential on purpose: same DbContext, and each host's query here
+            // depends on its own CheckResult already being committed above -
+            // batching the writes but running these concurrently too would just
+            // reintroduce the same per-connection contention for no benefit
+            // (incident writes are rare - only on an actual state change - so
+            // serializing them costs nothing noticeable).
+            foreach (var (host, outcome) in outcomes)
+            {
+                try
+                {
+                    var failThreshold = host.FailThresholdOverride ?? defaultFailThreshold;
+                    await EvaluateIncidentAsync(db, host, outcome.Success, failThreshold, stoppingToken);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogError(ex, "Error evaluating incident for host {HostId} ({HostName})", host.Id, host.Name);
+                }
+            }
 
-            // The dashboard (Phase 5) re-renders on its own via this event, no polling.
+            if (tSave > 50 || sw.ElapsedMilliseconds - tSave > 50)
+            {
+                logger.LogInformation(
+                    "[PERF] PersistAndEvaluateAsync: batchSave({Count})={SaveMs}ms evaluateIncidents={IncidentsMs}ms",
+                    outcomes.Count, tSave, sw.ElapsedMilliseconds - tSave);
+            }
+
+            // The dashboard (Phase 5) re-renders on its own via this event, no
+            // polling - once per tick now instead of once per host.
             statusNotifier.NotifyChanged();
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            logger.LogError(ex, "Error checking host {HostId} ({HostName})", host.Id, host.Name);
-        }
-        finally
-        {
-            throttle.Release();
+            logger.LogError(ex, "Error persisting check results for {Count} host(s)", outcomes.Count);
         }
     }
 

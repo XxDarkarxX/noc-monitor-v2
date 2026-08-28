@@ -4,6 +4,7 @@
 @inject SyncLogService SyncLogService
 @inject SyncLogNotifier Notifier
 @inject HpvSyncService HpvSyncService
+@inject ILogger<SyncLogPanel> Logger
 
 <div class="sync-log">
     <button type="button" class="sync-log-trigger" title="Sync HPVs/VMs now"
@@ -117,13 +118,33 @@
     // It's also the only thing that refreshes the panel after a click right
     // here (SyncLogService.AcknowledgeAsync fires this same event) — avoids
     // duplicating the refresh in the click handler itself.
-    private void OnChanged() => _ = InvokeAsync(async () =>
+    // [PERF audit]: same reasoning as Home.OnChanged - Debug level, this can
+    // fire up to 1/s and Information-level logging at that rate is just
+    // noise once the underlying issue is fixed.
+    private void OnChanged()
     {
-        await RefreshCountAsync();
-        if (_open)
-            await LoadTabAsync();
-        StateHasChanged();
-    });
+        var raisedAt = DateTime.Now;
+        Logger.LogDebug("[PERF] SyncLogPanel.OnChanged raised at {Time:HH:mm:ss.ffffff}", raisedAt);
+
+        _ = InvokeAsync(async () =>
+        {
+            var dispatchedAt = DateTime.Now;
+            Logger.LogDebug(
+                "[PERF] SyncLogPanel.OnChanged dispatched at {Time:HH:mm:ss.ffffff} (queue wait={QueueWaitMs}ms)",
+                dispatchedAt, (dispatchedAt - raisedAt).TotalMilliseconds);
+
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            await RefreshCountAsync();
+            var tCount = sw.ElapsedMilliseconds;
+            if (_open)
+                await LoadTabAsync();
+            var tTab = sw.ElapsedMilliseconds;
+            StateHasChanged();
+            Logger.LogDebug(
+                "[PERF] SyncLogPanel.OnChanged done: refreshCount={CountMs}ms loadTab={TabMs}ms total={TotalMs}ms",
+                tCount, tTab - tCount, sw.ElapsedMilliseconds);
+        });
+    }
 
     // Same RunSyncAsync used by the "Sync now" button on /hosts, so you don't
     // have to leave the dashboard/header. If the run adds/deactivates
@@ -131,6 +152,9 @@
     // above) — the StateHasChanged below is only for the spinning icon.
     private async Task SyncNowAsync()
     {
+        var startedAt = DateTime.Now;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         _syncing = true;
         StateHasChanged();
 
@@ -138,21 +162,39 @@
 
         _syncing = false;
         StateHasChanged();
+
+        Logger.LogInformation(
+            "[PERF] SyncNowAsync started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
+            startedAt, sw.ElapsedMilliseconds);
     }
 
     private async Task ToggleOpenAsync()
     {
+        var startedAt = DateTime.Now;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         _open = !_open;
         if (_open)
             await LoadTabAsync();
+
+        Logger.LogInformation(
+            "[PERF] ToggleOpenAsync started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
+            startedAt, sw.ElapsedMilliseconds);
     }
 
     private void Close() => _open = false;
 
     private async Task SetTabAsync(SyncLogTab tab)
     {
+        var startedAt = DateTime.Now;
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+
         _tab = tab;
         await LoadTabAsync();
+
+        Logger.LogInformation(
+            "[PERF] SetTabAsync({Tab}) started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
+            tab, startedAt, sw.ElapsedMilliseconds);
     }
 
     private async Task LoadTabAsync()
@@ -163,7 +205,12 @@
             _history = await SyncLogService.GetAllAsync();
     }
 
-    private Task AcknowledgeAsync(long id) => SyncLogService.AcknowledgeAsync(id);
+    private async Task AcknowledgeAsync(long id)
+    {
+        var startedAt = DateTime.Now;
+        Logger.LogInformation("[PERF] AcknowledgeAsync({Id}) click handler started={StartedAt:HH:mm:ss.ffffff}", id, startedAt);
+        await SyncLogService.AcknowledgeAsync(id);
+    }
 
     private string TabClass(SyncLogTab tab) => tab == _tab ? "active" : "";
 

@@ -6,9 +6,13 @@ namespace NocMonitor.Web.Services;
 /// header button updates its badge on its own via SignalR, no polling. Same
 /// pattern as HostStatusNotifier.
 /// </summary>
-public sealed class SyncLogNotifier
+public sealed class SyncLogNotifier(ILogger<SyncLogNotifier> logger)
 {
     public event Action? Changed;
 
-    public void NotifyChanged() => Changed?.Invoke();
+    public void NotifyChanged()
+    {
+        logger.LogDebug("[PERF] SyncLogNotifier firing at {Time:HH:mm:ss.ffffff}", DateTime.Now);
+        Changed?.Invoke();
+    }
 }
