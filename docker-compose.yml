@@ -1,0 +1,22 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    volumes:
+      - noc-monitor-data:/app/data
+    # PingChecker (NocMonitor.Core) opens a raw ICMP socket for host checks.
+    # The official ASP.NET runtime image runs as a non-root user, so this
+    # capability is required for ICMP checks to work; HTTP checks don't need it.
+    cap_add:
+      - NET_RAW
+    restart: unless-stopped
+
+volumes:
+  # Named volume so the SQLite DB (history, incidents, host list) survives
+  # container restarts/recreates. See README "Runbook" for backup/migration.
+  noc-monitor-data:
