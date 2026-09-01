@@ -107,8 +107,31 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-app.UseStaticFiles();
 app.UseAntiforgery();
+
+// MapStaticAssets, not UseStaticFiles: this is what was actually breaking
+// every @onclick in production. UseStaticFiles only serves framework
+// -provided static web assets (blazor.web.js, the file that boots the
+// entire interactive-server JS runtime and SignalR circuit) when
+// IHostEnvironment.EnvironmentName is "Development" - it needs an
+// explicit UseStaticWebAssets() call to serve them anywhere else, which
+// this never had. The Docker image runs as Production (no
+// ASPNETCORE_ENVIRONMENT override, which is correct - Production is the
+// right environment for it), so blazor.web.js 404'd on every request:
+// the page still rendered fine (server-side prerendered HTML doesn't need
+// it), but no circuit ever connected, so literally nothing wired to
+// @onclick anywhere in the app could ever reach the server - confirmed
+// directly against the running container (curl 404, zero _blazor network
+// requests, native .click() calls producing no server-side log activity
+// on multiple different buttons). MapStaticAssets is the modern
+// replacement recommended for exactly this: it serves the full static
+// web assets manifest - both wwwroot and framework/package-provided -
+// correctly in every environment, with fingerprinting and precompression
+// as a bonus. wwwroot files like site.css always worked regardless of
+// environment (they're just copied into the output directory at publish
+// time), so this bug only ever showed up as "clicks silently do nothing",
+// nothing you'd think to check via the CSS or the page rendering fine.
+app.MapStaticAssets();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

@@ -7,13 +7,17 @@
 @inject ILogger<SyncLogPanel> Logger
 
 <div class="sync-log">
+    @* !RendererInfo.IsInteractive on both: same reasoning as the /hosts Sync
+       button - disabled until the interactive circuit takes over, so a
+       click during the SSR prerender window doesn't silently do nothing. *@
     <button type="button" class="sync-log-trigger" title="Sync HPVs/VMs now"
-            aria-label="Sync HPVs/VMs now" disabled="@_syncing"
+            aria-label="Sync HPVs/VMs now" disabled="@(_syncing || !RendererInfo.IsInteractive)"
             @onclick="SyncNowAsync">
         <span class="@(_syncing ? "sync-log-icon sync-log-icon-spinning" : "sync-log-icon")" aria-hidden="true">⟳</span>
     </button>
     <button type="button" class="sync-log-trigger" title="HPV/VM sync log"
             aria-label="HPV/VM sync log" aria-haspopup="dialog" aria-expanded="@_open"
+            disabled="@(!RendererInfo.IsInteractive)"
             @onclick="ToggleOpenAsync">
         <span class="sync-log-icon" aria-hidden="true">🕘</span>
         @if (_unacknowledgedCount > 0)

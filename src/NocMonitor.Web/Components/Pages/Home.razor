@@ -61,8 +61,13 @@ else
                 @foreach (var info in group)
                 {
                     <div class="host-card status-@StatusClass(info.Status)">
+                        @* !RendererInfo.IsInteractive: same reasoning as the /hosts Sync
+                           button - disabled until the interactive circuit takes over,
+                           so a click during the SSR prerender window doesn't silently
+                           do nothing. *@
                         <button type="button" class="host-managed-toggle @(info.Host.IsMonitored ? "managed" : "unmanaged")"
                                 title="@(info.Host.IsMonitored ? "Stop checking (maintenance)" : "Resume checking")"
+                                disabled="@(!RendererInfo.IsInteractive)"
                                 @onclick="() => ToggleManagedAsync(info.Host)">
                             @(info.Host.IsMonitored ? "Managed" : "Unmanaged")
                         </button>
