@@ -706,6 +706,11 @@ table.host-table {
     font-size: 0.85rem;
 }
 
+.form-error {
+    color: var(--status-down);
+    font-weight: 500;
+}
+
 /* --- SignalR connection status (Phase 5) --- */
 /* Blazor creates this <div> at runtime and toggles its visibility with
    style="display: block/none" set directly inline by its own JS (not via

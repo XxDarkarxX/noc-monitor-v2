@@ -68,7 +68,17 @@ else
             <InputNumber @bind-Value="_form.FailThresholdOverride" />
         </div>
 
-        <button type="submit">Save</button>
+        @if (_saveError is not null)
+        {
+            <p class="form-error">@_saveError</p>
+        }
+
+        @* !RendererInfo.IsInteractive: same reasoning as the /hosts Sync
+           button - disabled until the interactive circuit takes over, so a
+           click during the SSR prerender window doesn't silently do
+           nothing. _saving additionally guards against double-submit
+           (double-click, or a slow save) creating a duplicate host. *@
+        <button type="submit" disabled="@(_saving || !RendererInfo.IsInteractive)">@(_saving ? "Saving..." : "Save")</button>
         <a href="/hosts">Cancel</a>
     </EditForm>
 }
@@ -79,6 +89,8 @@ else
     private bool _loading = true;
     private bool _notFound;
     private bool _readOnlyBlocked;
+    private bool _saving;
+    private string? _saveError;
     private HostFormModel _form = new();
 
     protected override async Task OnInitializedAsync()
@@ -111,22 +123,47 @@ else
         _loading = false;
     }
 
+    // Neither CreateAsync nor UpdateAsync returns an explicit success/failure
+    // indicator - like the rest of this codebase, they signal failure by
+    // throwing (see HpvSyncService/PingChecker for the same convention).
+    // Catching here, rather than adding a new Result-shaped return type just
+    // for this one form, keeps that consistent: a thrown exception is
+    // "failure" everywhere else in this app too. Without this, a failed
+    // save (e.g. a DB conflict) used to propagate uncaught up through the
+    // circuit instead of showing a message the user could act on, and
+    // NavigateTo would never have been reached anyway - but the submit
+    // button had nothing to prevent a second click queuing up a duplicate
+    // save attempt in the meantime.
     private async Task SaveAsync()
     {
-        if (Id is { } id)
-        {
-            await HostService.UpdateAsync(
-                id, _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
-                _form.IntervalSecondsOverride, _form.FailThresholdOverride);
-        }
-        else
-        {
-            await HostService.CreateAsync(
-                _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
-                _form.IntervalSecondsOverride, _form.FailThresholdOverride);
-        }
+        _saving = true;
+        _saveError = null;
 
-        Nav.NavigateTo("/hosts");
+        try
+        {
+            if (Id is { } id)
+            {
+                await HostService.UpdateAsync(
+                    id, _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
+                    _form.IntervalSecondsOverride, _form.FailThresholdOverride);
+                Nav.NavigateTo("/hosts");
+            }
+            else
+            {
+                // Redirect to the new host's own history/detail page instead
+                // of the general list - CreateAsync returns the created
+                // entity specifically so its Id is available here for this.
+                var host = await HostService.CreateAsync(
+                    _form.Name!, _form.CheckType, _form.Ip, _form.HttpUrl,
+                    _form.IntervalSecondsOverride, _form.FailThresholdOverride);
+                Nav.NavigateTo($"/hosts/{host.Id}/history");
+            }
+        }
+        catch (Exception ex)
+        {
+            _saveError = $"Could not save the host: {ex.Message}";
+            _saving = false;
+        }
     }
 
     private sealed class HostFormModel : IValidatableObject
