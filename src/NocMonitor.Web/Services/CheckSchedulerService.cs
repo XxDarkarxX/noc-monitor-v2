@@ -171,11 +171,18 @@ public sealed class CheckSchedulerService(
             var tSave = sw.ElapsedMilliseconds;
 
             // Sequential on purpose: same DbContext, and each host's query here
-            // depends on its own CheckResult already being committed above -
-            // batching the writes but running these concurrently too would just
-            // reintroduce the same per-connection contention for no benefit
-            // (incident writes are rare - only on an actual state change - so
-            // serializing them costs nothing noticeable).
+            // depends on its own CheckResult already being committed above.
+            // EvaluateIncidentAsync only mutates tracked entities now, it
+            // doesn't call SaveChangesAsync itself - the "incident writes are
+            // rare, so one SaveChangesAsync per host costs nothing" assumption
+            // this used to run on broke during a real mass outage: every host
+            // crossing FailThreshold on the same tick meant N sequential write
+            // -lock acquisitions in a row (SQLite allows one writer at a
+            // time), long enough to starve a concurrent UI write (Mute,
+            // Managed/Unmanaged, manual sync) for minutes - exactly when you
+            // most need the UI responsive. One batched save below instead of
+            // up to N cuts that to a single lock acquisition regardless of
+            // how many hosts changed state this tick.
             foreach (var (host, outcome) in outcomes)
             {
                 try
@@ -188,6 +195,8 @@ public sealed class CheckSchedulerService(
                     logger.LogError(ex, "Error evaluating incident for host {HostId} ({HostName})", host.Id, host.Name);
                 }
             }
+
+            await db.SaveChangesAsync(stoppingToken);
 
             if (tSave > 50 || sw.ElapsedMilliseconds - tSave > 50)
             {
@@ -209,9 +218,16 @@ public sealed class CheckSchedulerService(
     /// <summary>
     /// Opens/closes the host's Incident based on the check result and fires
     /// the corresponding alert (or the periodic reminder if the incident is
-    /// still open). The send itself is fired without awaiting it
-    /// (fire-and-forget with its own scope) so it doesn't block the
-    /// scheduler's throttle while Discord responds.
+    /// still open). Only mutates tracked entities - the caller does one
+    /// SaveChangesAsync for the whole batch after calling this for every
+    /// host, so this doesn't grab its own write lock per host (see the
+    /// caller's comment). Safe to defer: FireAlert only reads fields already
+    /// set in memory before it's called (AlertsSent, StartedAt via its
+    /// property initializer, ResolvedAt) - nothing it sends depends on the
+    /// DB-generated Incident.Id or on this having been committed yet.
+    /// The send itself is fired without awaiting it (fire-and-forget with
+    /// its own scope) so it doesn't block the scheduler's throttle while
+    /// Discord responds.
     /// </summary>
     private async Task EvaluateIncidentAsync(NocMonitorDbContext db, Host host, bool success, int failThreshold, CancellationToken stoppingToken)
     {
@@ -226,7 +242,6 @@ public sealed class CheckSchedulerService(
                 return;
 
             openIncident.ResolvedAt = DateTime.UtcNow;
-            await db.SaveChangesAsync(stoppingToken);
 
             FireAlert(host, openIncident, isRecovery: true, stoppingToken);
             return;
@@ -247,7 +262,6 @@ public sealed class CheckSchedulerService(
 
             openIncident = new Incident { HostId = host.Id, AlertsSent = 1, LastAlertAt = DateTime.UtcNow };
             db.Incidents.Add(openIncident);
-            await db.SaveChangesAsync(stoppingToken);
 
             FireAlert(host, openIncident, isRecovery: false, stoppingToken);
             return;
@@ -260,7 +274,6 @@ public sealed class CheckSchedulerService(
 
         openIncident.AlertsSent++;
         openIncident.LastAlertAt = DateTime.UtcNow;
-        await db.SaveChangesAsync(stoppingToken);
 
         FireAlert(host, openIncident, isRecovery: false, stoppingToken);
     }
