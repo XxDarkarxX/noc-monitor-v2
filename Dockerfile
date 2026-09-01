@@ -30,8 +30,24 @@ COPY --from=build /app/publish .
 # fail to create nocmonitor.db under the /app/data mount with "permission
 # denied". Owning the directory here (as root, before switching back) makes
 # sure it's writable regardless of how the volume gets initialized.
+#
+# iputils-ping: this minimal runtime image has no `ping` binary. .NET's
+# System.Net.NetworkInformation.Ping on Linux tries a raw ICMP socket first
+# (needs CAP_NET_RAW - see cap_add in docker-compose.yml) and falls back to
+# shelling out to the OS `ping` command when that's unavailable; without this
+# package that fallback has nothing to exec and throws
+# PlatformNotSupportedException ("The system's ping utility could not be
+# found"), which is exactly what took every host's checks down in
+# production. Debian's iputils-ping sets CAP_NET_RAW as a *file* capability
+# on /bin/ping (setcap, not setuid-root), so the fallback works via that
+# binary's own privilege regardless of whether cap_add actually reaches this
+# non-root process - keep cap_add too, since it lets the raw-socket path
+# succeed directly without needing the subprocess fallback at all.
 USER root
-RUN mkdir -p /app/data && chown -R $APP_UID /app/data
+RUN mkdir -p /app/data && chown -R $APP_UID /app/data \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends iputils-ping \
+    && rm -rf /var/lib/apt/lists/*
 USER $APP_UID
 
 # Plain HTTP: this runs inside a trusted internal network, not exposed to
