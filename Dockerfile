@@ -14,9 +14,21 @@ COPY src/NocMonitor.Web/NocMonitor.Web.csproj src/NocMonitor.Web/
 RUN dotnet restore src/NocMonitor.Web/NocMonitor.Web.csproj
 
 COPY src/ src/
+# No --no-restore here (despite the restore layer above): with only the
+# .csproj files present, that early restore doesn't discover the project's
+# actual wwwroot/static web assets, so it produces an incomplete static
+# assets manifest - blazor.web.js (the interactive-server runtime script)
+# silently missing from it entirely, not just pointing at a broken path.
+# --no-restore was trusting that incomplete manifest instead of letting this
+# step regenerate it against the real source tree now present. Confirmed:
+# this is what caused every single @onclick in production to do nothing -
+# the manifest gap meant MapStaticAssets had nothing to serve blazor.web.js
+# from, same symptom (404) as the UseStaticFiles bug this Dockerfile change
+# was meant to fix, just one layer deeper. NuGet packages are already on
+# disk from the restore layer above, so this re-run is fast, not a full
+# re-download.
 RUN dotnet publish src/NocMonitor.Web/NocMonitor.Web.csproj \
     --configuration Release \
-    --no-restore \
     --output /app/publish
 
 # --- Runtime ---------------------------------------------------------------
