@@ -9,9 +9,16 @@ services:
       - .env
     volumes:
       - noc-monitor-data:/app/data
-    # PingChecker (NocMonitor.Core) opens a raw ICMP socket for host checks.
-    # The official ASP.NET runtime image runs as a non-root user, so this
-    # capability is required for ICMP checks to work; HTTP checks don't need it.
+    # PingChecker (NocMonitor.Core) does ICMP checks via .NET's Ping class,
+    # which tries a raw socket first and needs this capability for that path
+    # to succeed - HTTP checks don't need it. In practice, on this image, the
+    # raw socket hasn't been reliably available to the non-root process even
+    # with this set, and ICMP checks work anyway because .NET falls back to
+    # shelling out to the `ping` binary (see the iputils-ping comment in
+    # Dockerfile) - that fallback gets its own privilege from the binary's
+    # file capability, independent of this. Kept because it lets the faster
+    # raw-socket path succeed directly whenever it does work, but don't rely
+    # on it alone if ICMP checks ever start failing - see Dockerfile first.
     cap_add:
       - NET_RAW
     restart: unless-stopped

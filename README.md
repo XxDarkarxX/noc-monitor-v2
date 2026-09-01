@@ -135,7 +135,13 @@ Inside the container at `/app/data/nocmonitor.db`, backed by the
 to back it up or move it. It has the host list, check history, and incidents;
 losing it doesn't affect the internal HPV/VM API or Discord, just this app's
 own state (the weekly sync will repopulate synced hosts on its own, but check
-history and any manually-added hosts would be gone).
+history and any manually-added hosts would be gone). It runs in SQLite WAL
+mode (`Program.cs` sets `PRAGMA journal_mode=WAL` once at startup) so a UI
+read never waits on `CheckSchedulerService`'s writes — if the DB ever ends
+up back in the default rollback-journal mode (e.g. after being copied in a
+way that doesn't preserve the `-wal`/`-shm` files), a mass status change
+across many hosts at once can make Mute/Managed/manual-sync clicks hang for
+minutes waiting on the write lock.
 
 **Discord webhook stopped working**
 
@@ -156,3 +162,59 @@ startup):
 ```bash
 docker compose up -d
 ```
+
+**All hosts show Down at once (ICMP checks failing across the board)**
+
+If `docker compose logs web` shows `PlatformNotSupportedException` for
+every ICMP host, it's almost certainly not a network/VLAN/capability
+problem — confirm first with a native ping from inside a throwaway
+container (`docker run --rm --entrypoint ping <image> -c 3 <ip>`) and from
+the Docker host itself; if both succeed but the app still reports Down,
+the ICMP check itself is broken, not connectivity to the host in question.
+Two known causes, both already fixed in this codebase but worth knowing if
+they ever resurface (e.g. after reverting `PingChecker.cs` or the
+Dockerfile):
+
+1. The final image is missing the `ping` binary (`iputils-ping` — see the
+   comment in `Dockerfile`). .NET's `Ping` class falls back to shelling out
+   to it when it can't get a raw ICMP socket in-process; without the
+   binary, that fallback throws
+   `PlatformNotSupportedException("...ping utility could not be found")`.
+2. `PingChecker` passing a custom payload buffer to `SendPingAsync` — that
+   subprocess fallback explicitly rejects a non-default payload with
+   `PlatformNotSupportedException("Unable to send custom ping payload...")`,
+   even when the `ping` binary is present and genuinely reachable.
+
+**Buttons don't respond to clicks (Sync, Mute, Managed/Unmanaged, anything)**
+
+If this happens app-wide — not just one button — it's not a per-component
+bug: check `curl http://localhost:8080/_framework/blazor.web.js` from
+inside the container. A 404 there means the interactive Blazor Server JS
+runtime never loaded, so no SignalR circuit ever connects and nothing wired
+to `@onclick` anywhere can reach the server — the page still renders fine
+via server-prerendered HTML, which is exactly why this is easy to miss.
+Two things have to both be right for this to work, and either one being
+wrong reproduces the exact same 404:
+
+1. `Program.cs` must use `app.MapStaticAssets()`, not `app.UseStaticFiles()`
+   — the latter only serves framework-provided static web assets (like
+   `blazor.web.js`) when `ASPNETCORE_ENVIRONMENT=Development`, which this
+   deployment correctly doesn't set (it should run as Production).
+2. The Dockerfile's `dotnet publish` step must NOT pass `--no-restore`.
+   The early `dotnet restore` layer only has the `.csproj` files copied in
+   (by design, for Docker layer caching), so it can't fully discover the
+   project's static web assets at that point; `--no-restore` on publish
+   then skips regenerating the manifest against the real source tree,
+   silently dropping `blazor.web.js` from it entirely.
+
+If you ever see this again, check the manifest directly rather than
+guessing which of the two it is:
+
+```bash
+docker run --rm --entrypoint sh <image> -c \
+  'grep -c blazor /app/NocMonitor.Web.staticwebassets.endpoints.json'
+```
+
+`0` means the manifest itself is missing the entry (cause 2, the Dockerfile);
+a nonzero count with `blazor.web.js` still 404ing at runtime points at cause
+1 instead (`Program.cs`/environment).
