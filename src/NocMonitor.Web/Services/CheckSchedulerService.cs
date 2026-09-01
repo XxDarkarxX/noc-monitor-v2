@@ -74,9 +74,6 @@ public sealed class CheckSchedulerService(
                 }
             }
 
-            if (dueHosts.Count == 0)
-                continue;
-
             // Checks run concurrently (I/O-bound, no DB access) but persistence
             // is batched into a single transaction below. Root cause of the
             // [PERF] audit: N due hosts used to mean N concurrent
@@ -88,8 +85,30 @@ public sealed class CheckSchedulerService(
             // reload, SetManagedAsync, AcknowledgeAsync) whenever they landed
             // during a burst. One batched write per tick turns that from
             // O(dueHosts) lock acquisitions into 1, regardless of host count.
-            var outcomes = await CheckHostsAsync(dueHosts, throttle, stoppingToken);
-            await PersistAndEvaluateAsync(outcomes, defaultFailThreshold, stoppingToken);
+            if (dueHosts.Count > 0)
+            {
+                var outcomes = await CheckHostsAsync(dueHosts, throttle, stoppingToken);
+                await PersistAndEvaluateAsync(outcomes, defaultFailThreshold, stoppingToken);
+            }
+
+            // Every tick, not just when dueHosts.Count > 0: hosts all start
+            // with the same IntervalSecondsOverride/default and get
+            // rescheduled to now+interval right above, so - having all
+            // started from the same reference point - they stay
+            // synchronized in lockstep and are due together roughly once
+            // per interval, not spread across ticks. Confirmed by measuring
+            // HostStatusNotifier's own firing timestamps in production:
+            // ~5-6s apart, matching Monitor:IntervalSeconds, not the 1s tick
+            // rate - so the dashboard's "Xs ago" per host only ever
+            // refreshed once per check interval, and since that refresh
+            // always landed right after LastCheckAt was just updated, it
+            // read as permanently stuck at "0s ago" instead of counting up.
+            // GetHostStatusesAsync is a few ms even at the current host
+            // count (see its own [PERF] logging), so firing this every
+            // second regardless of whether anything is actually due costs
+            // nothing worth avoiding - HostStatusNotifier's own 1/s throttle
+            // is still the real backstop against overlapping renders.
+            statusNotifier.NotifyChanged();
         }
     }
 
@@ -205,9 +224,9 @@ public sealed class CheckSchedulerService(
                     outcomes.Count, tSave, sw.ElapsedMilliseconds - tSave);
             }
 
-            // The dashboard (Phase 5) re-renders on its own via this event, no
-            // polling - once per tick now instead of once per host.
-            statusNotifier.NotifyChanged();
+            // Dashboard notification happens once per tick in the caller
+            // (ExecuteAsync), after this returns - not here, so it still
+            // fires on ticks with nothing due (see that comment for why).
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

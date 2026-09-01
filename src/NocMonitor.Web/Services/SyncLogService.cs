@@ -39,8 +39,11 @@ public sealed class SyncLogService(NocMonitorDbContext db, SyncLogNotifier notif
 
         notifier.NotifyChanged();
 
-        // [PERF]
-        logger.LogInformation(
+        // [PERF audit]: Debug level - SyncLogPanel.AcknowledgeAsync already
+        // logs this same click's start time at Debug too; this one is the
+        // finer-grained fetch/save/notify split, useful together but neither
+        // needed at permanent Information level.
+        logger.LogDebug(
             "[PERF] AcknowledgeAsync({Id}): fetch={FetchMs}ms save={SaveMs}ms notify={NotifyMs}ms total={TotalMs}ms",
             id, tFetch, tSave - tFetch, sw.ElapsedMilliseconds - tSave, sw.ElapsedMilliseconds);
     }

@@ -226,9 +226,12 @@ else
         await LoadAsync();
     }
 
+    // [PERF audit]: Debug level, same reasoning as OnChanged above - this is
+    // a per-click log, fine as a diagnostic to turn on when needed, too
+    // frequent for permanent Information-level logging.
     private async Task ToggleManagedAsync(Host host)
     {
-        // [PERF] this is a click handler: it already runs on the circuit's
+        // this is a click handler: it already runs on the circuit's
         // dispatcher (Blazor queues @onclick invocations same as InvokeAsync),
         // so this start time already reflects any queueing delay from other
         // work on the same circuit (e.g. Home.OnChanged from HostStatusNotifier).
@@ -241,7 +244,7 @@ else
         await LoadAsync();
         var tLoad = sw.ElapsedMilliseconds;
 
-        Logger.LogInformation(
+        Logger.LogDebug(
             "[PERF] ToggleManagedAsync({HostId}) started={StartedAt:HH:mm:ss.ffffff} setManaged={SetMs}ms load={LoadMs}ms total={TotalMs}ms",
             host.Id, startedAt, tSet, tLoad - tSet, sw.ElapsedMilliseconds);
     }

@@ -157,6 +157,10 @@
     //
     // try/finally around _syncing: same defense-in-depth reasoning as
     // HostsPage.SyncNowAsync — this icon must never get stuck spinning forever.
+    //
+    // [PERF audit]: Debug level, same reasoning as OnChanged above - this is
+    // a per-click log, fine as a diagnostic to turn on when needed, too
+    // frequent for permanent Information-level logging.
     private async Task SyncNowAsync()
     {
         var startedAt = DateTime.Now;
@@ -175,7 +179,7 @@
             StateHasChanged();
         }
 
-        Logger.LogInformation(
+        Logger.LogDebug(
             "[PERF] SyncNowAsync started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
             startedAt, sw.ElapsedMilliseconds);
     }
@@ -189,7 +193,7 @@
         if (_open)
             await LoadTabAsync();
 
-        Logger.LogInformation(
+        Logger.LogDebug(
             "[PERF] ToggleOpenAsync started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
             startedAt, sw.ElapsedMilliseconds);
     }
@@ -204,7 +208,7 @@
         _tab = tab;
         await LoadTabAsync();
 
-        Logger.LogInformation(
+        Logger.LogDebug(
             "[PERF] SetTabAsync({Tab}) started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",
             tab, startedAt, sw.ElapsedMilliseconds);
     }
@@ -220,7 +224,7 @@
     private async Task AcknowledgeAsync(long id)
     {
         var startedAt = DateTime.Now;
-        Logger.LogInformation("[PERF] AcknowledgeAsync({Id}) click handler started={StartedAt:HH:mm:ss.ffffff}", id, startedAt);
+        Logger.LogDebug("[PERF] AcknowledgeAsync({Id}) click handler started={StartedAt:HH:mm:ss.ffffff}", id, startedAt);
         await SyncLogService.AcknowledgeAsync(id);
     }
 

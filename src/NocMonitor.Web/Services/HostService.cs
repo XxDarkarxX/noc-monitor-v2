@@ -111,8 +111,11 @@ public sealed class HostService(NocMonitorDbContext db, ILogger<HostService> log
 
         await db.SaveChangesAsync(cancellationToken);
 
-        // [PERF]
-        logger.LogInformation(
+        // [PERF audit]: Debug level - Home.ToggleManagedAsync already logs
+        // the end-to-end timing for this same click at Debug too; this one
+        // is the finer-grained fetch/save split, useful together but neither
+        // needed at permanent Information level.
+        logger.LogDebug(
             "[PERF] SetManagedAsync({HostId}): fetch={FetchMs}ms save={SaveMs}ms total={TotalMs}ms",
             id, tFetch, sw.ElapsedMilliseconds - tFetch, sw.ElapsedMilliseconds);
     }
