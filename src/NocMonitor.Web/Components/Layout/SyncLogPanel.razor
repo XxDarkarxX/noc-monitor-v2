@@ -150,6 +150,9 @@
     // have to leave the dashboard/header. If the run adds/deactivates
     // anything, HpvSyncService already calls Notifier.NotifyChanged() (OnChanged
     // above) — the StateHasChanged below is only for the spinning icon.
+    //
+    // try/finally around _syncing: same defense-in-depth reasoning as
+    // HostsPage.SyncNowAsync — this icon must never get stuck spinning forever.
     private async Task SyncNowAsync()
     {
         var startedAt = DateTime.Now;
@@ -158,10 +161,15 @@
         _syncing = true;
         StateHasChanged();
 
-        await HpvSyncService.RunSyncAsync(CancellationToken.None);
-
-        _syncing = false;
-        StateHasChanged();
+        try
+        {
+            await HpvSyncService.RunSyncAsync(CancellationToken.None);
+        }
+        finally
+        {
+            _syncing = false;
+            StateHasChanged();
+        }
 
         Logger.LogInformation(
             "[PERF] SyncNowAsync started={StartedAt:HH:mm:ss.ffffff} total={TotalMs}ms",

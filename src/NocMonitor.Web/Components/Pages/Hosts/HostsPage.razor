@@ -1,8 +1,10 @@
 @page "/hosts"
+@implements IDisposable
 @using NocMonitor.Data.Entities
 @using NocMonitor.Web.Services
 @inject HostService HostService
 @inject HpvSyncService HpvSyncService
+@inject SyncLogNotifier Notifier
 @inject IJSRuntime JS
 
 <PageTitle>Hosts - NOC Monitor</PageTitle>
@@ -11,7 +13,12 @@
 
 <p>
     <a class="btn" href="/hosts/new">+ New host</a>
-    <button type="button" class="btn" disabled="@_syncing" @onclick="SyncNowAsync">
+    @* !RendererInfo.IsInteractive: during the SSR prerender pass (before the
+       circuit connects) the button looks clickable but has no event handler
+       wired up yet - clicking it that early silently does nothing. Disabling
+       it until the interactive render takes over closes that window instead
+       of leaving a click that looks ignored. *@
+    <button type="button" class="btn" disabled="@(_syncing || !RendererInfo.IsInteractive)" @onclick="SyncNowAsync">
         @(_syncing ? "Syncing..." : "Sync now")
     </button>
     @if (_syncMessage is not null)
@@ -80,12 +87,27 @@ else
     private bool _syncing;
     private string? _syncMessage;
 
-    protected override Task OnInitializedAsync() => LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        Notifier.Changed += OnChanged;
+    }
 
     private async Task LoadAsync()
     {
         _hosts = await HostService.GetAllAsync();
     }
+
+    // Bug fix: this page used to only reload _hosts from its OWN "Sync now"
+    // click handler below, with no subscription to anything - so triggering
+    // a sync from the HEADER icon (a different component) updated the DB but
+    // never touched this page's list until a manual navigation/reload.
+    // Subscribing here follows the same pattern as Home.razor/SyncLogPanel.
+    private void OnChanged() => _ = InvokeAsync(async () =>
+    {
+        await LoadAsync();
+        StateHasChanged();
+    });
 
     private async Task DeleteAsync(Host host)
     {
@@ -103,20 +125,33 @@ else
     }
 
     // Triggers the same logic that runs on its own every Sunday 3am
-    // (RunSyncAsync already catches its own exceptions and just logs),
-    // handy for demos without waiting on the cron. The header's sync panel
-    // refreshes on its own via SyncLogNotifier; here we just need to reload
-    // the host table.
+    // (RunSyncAsync already catches its own exceptions and just logs), handy
+    // for demos without waiting on the cron. LoadAsync here is redundant with
+    // OnChanged above (HpvSyncService now notifies on every successful run,
+    // not just added/deactivated), but it's cheap and guarantees a refresh
+    // even if the notification's InvokeAsync round-trip hasn't landed yet.
+    //
+    // try/finally around _syncing: defense in depth. RunSyncAsync should
+    // already catch everything it can (see its exception-filter fix), but if
+    // anything ever still escapes, this button must not get stuck disabled
+    // forever with no way to retry short of a page reload.
     private async Task SyncNowAsync()
     {
         _syncing = true;
         _syncMessage = null;
         StateHasChanged();
 
-        await HpvSyncService.RunSyncAsync(CancellationToken.None);
-        await LoadAsync();
-
-        _syncing = false;
-        _syncMessage = $"Last run: {DateTime.Now:HH:mm:ss}";
+        try
+        {
+            await HpvSyncService.RunSyncAsync(CancellationToken.None);
+            await LoadAsync();
+        }
+        finally
+        {
+            _syncing = false;
+            _syncMessage = $"Last run: {DateTime.Now:HH:mm:ss}";
+        }
     }
+
+    public void Dispose() => Notifier.Changed -= OnChanged;
 }

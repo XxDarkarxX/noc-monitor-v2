@@ -87,17 +87,35 @@ public sealed class HpvSyncService(
 
             await db.SaveChangesAsync(stoppingToken);
 
-            // Only notify the header panel if this run wrote real
-            // additions/deactivations (SyncLogEntry) — a run that only
-            // updated existing hosts has nothing new to show.
-            if (hpvAdded + vmAdded + vmDeactivated > 0)
-                syncLogNotifier.NotifyChanged();
+            // Notify on every successful run, not just when there were
+            // additions/deactivations: an update-only run still changes
+            // fields (Name/Ip/IsMonitored) that HostsPage's table shows, and
+            // in practice almost every routine run is update-only (added/
+            // deactivated only happen when a host actually appears/vanishes
+            // upstream) — gating this on added+deactivated>0 meant /hosts
+            // basically never auto-refreshed after a real-world sync.
+            // SyncLogPanel.OnChanged (the other subscriber) just recomputes
+            // the unread count and reloads its own tab if open, both cheap
+            // no-ops when there's nothing new, so firing unconditionally
+            // doesn't cost it anything either.
+            syncLogNotifier.NotifyChanged();
 
             logger.LogInformation(
                 "HPV/VM sync completed — HPVs: {HpvAdded} added, {HpvUpdated} updated. Critical VMs: {VmAdded} added, {VmUpdated} updated, {VmDeactivated} deactivated.",
                 hpvAdded, hpvUpdated, vmAdded, vmUpdated, vmDeactivated);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        // Deliberately NOT just "ex is not OperationCanceledException": if the
+        // internal HTTP request times out (HttpClient.Timeout, configured in
+        // Program.cs), it throws TaskCanceledException - which IS-A
+        // OperationCanceledException, so a naive filter here would silently
+        // swallow it with no log line at all. That previously left the "Sync
+        // now" button stuck on "Syncing..." forever with zero evidence in the
+        // logs whenever HpvApi was unreachable in a way that hangs instead of
+        // refusing immediately (e.g. a network with no route back - exactly
+        // what happens if a Docker container can't reach an internal LAN IP).
+        // Only skip logging when OUR OWN stoppingToken (app shutdown) is what
+        // requested the cancellation - that one legitimately isn't an error.
+        catch (Exception ex) when (!(ex is OperationCanceledException) || !stoppingToken.IsCancellationRequested)
         {
             logger.LogError(ex, "Error running the HPV/VM sync");
         }

@@ -38,6 +38,11 @@ builder.Services.AddHttpClient(nameof(HpvSyncService), (sp, client) =>
     var baseUrl = sp.GetRequiredService<IConfiguration>()["HpvApi:BaseUrl"];
     if (!string.IsNullOrWhiteSpace(baseUrl))
         client.BaseAddress = new Uri(baseUrl);
+    // Default HttpClient.Timeout is 100s - way too long for a UI button to
+    // sit on "Syncing..." if the internal API becomes unreachable (see the
+    // exception-filter comment in HpvSyncService.RunSyncAsync for the related
+    // bug this made worse: a silent, unbounded hang with nothing logged).
+    client.Timeout = TimeSpan.FromSeconds(20);
 });
 builder.Services.AddSingleton<SyncLogNotifier>();
 builder.Services.AddScoped<SyncLogService>();
